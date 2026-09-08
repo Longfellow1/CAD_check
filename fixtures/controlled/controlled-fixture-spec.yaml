@@ -1,0 +1,177 @@
+schema: cad-check-controlled-fixture/v0.1
+fixture_id: controlled_vehicle
+units: mm
+coordinate_system:
+  origin: vehicle_assembly_origin
+  x: vehicle_longitudinal_forward
+  y: vehicle_left
+  z: vehicle_up
+  measurement: "minimum surface-to-surface distance unless executor says otherwise"
+
+components:
+  - id: battery
+    label: Battery Pack
+    assembly_path: vehicle/front_bay/battery
+    category: power_battery
+    primitive: box
+    size_mm: [1500, 1100, 120]
+    v1_center_mm: [0, 0, 220]
+    v2_center_mm: [0, 0, 216]
+  - id: underbody_bracket
+    label: Underbody Bracket
+    assembly_path: vehicle/front_bay/underbody_bracket
+    category: body_bracket
+    primitive: box
+    size_mm: [500, 800, 20]
+    center_mm: [0, 0, 138]
+  - id: left_rail
+    label: Left Rail
+    assembly_path: vehicle/body/left_rail
+    category: body
+    primitive: box
+    size_mm: [1700, 90, 160]
+    center_mm: [0, 650, 300]
+  - id: right_rail
+    label: Right Rail
+    assembly_path: vehicle/body/right_rail
+    category: body
+    primitive: box
+    size_mm: [1700, 90, 160]
+    center_mm: [0, -650, 300]
+  - id: motor
+    label: Front Drive Motor
+    assembly_path: vehicle/front_bay/motor
+    category: powertrain
+    primitive: box
+    size_mm: [520, 480, 420]
+    center_mm: [650, 0, 520]
+  - id: heat_source
+    label: Heat Source Envelope
+    assembly_path: vehicle/front_bay/heat_source
+    category: heat_source
+    primitive: box
+    size_mm: [600, 180, 180]
+    center_mm: [720, 480, 450]
+  - id: ground_ref
+    label: Ground Reference
+    assembly_path: vehicle/references/ground_ref
+    category: reference
+    primitive: box
+    size_mm: [2800, 1700, 10]
+    center_mm: [0, 0, -5]
+  - id: envelope
+    label: Vehicle Envelope
+    assembly_path: vehicle/references/envelope
+    category: reference
+    primitive: box
+    size_mm: [3200, 1800, 1600]
+    center_mm: [0, 0, 800]
+
+versions:
+  - id: V1
+    file: controlled_vehicle_v1.stp
+    description: "baseline; all stable IDs and paths present"
+  - id: V2
+    file: controlled_vehicle_v2.stp
+    description: "candidate; battery shifted down 4 mm"
+
+cases:
+  - id: CF-CLR-001
+    title: Battery to underbody bracket clearance
+    source: Controlled Automotive Fixture
+    source_ref: controlled-fixture-spec.yaml#CF-CLR-001
+    engineering_domain: static_clearance
+    verification_method: ANALYSIS_GEOMETRY
+    executor: minimum_clearance
+    target: battery
+    counterpart: underbody_bracket
+    rule:
+      operator: ">="
+      threshold: 10.0
+      unit: mm
+    regression_epsilon: 0.1
+    expected:
+      V1:
+        measured: 12.0
+        status: PASS
+      V2:
+        measured: 8.0
+        status: FAIL
+      comparison:
+        regression: NEW_FAIL
+        delta: -4.0
+  - id: CF-DIR-001
+    title: Battery vertical ground clearance
+    source: Controlled Automotive Fixture
+    source_ref: controlled-fixture-spec.yaml#CF-DIR-001
+    engineering_domain: static_clearance
+    verification_method: ANALYSIS_GEOMETRY
+    executor: directional_distance
+    target: battery
+    counterpart: ground_ref
+    axis: Z
+    rule:
+      operator: ">="
+      threshold: 130.0
+      unit: mm
+    expected:
+      V1:
+        measured: 160.0
+        status: PASS
+      V2:
+        measured: 156.0
+        status: PASS
+  - id: CF-ANG-001
+    title: Motor yaw envelope
+    source: Controlled Automotive Fixture
+    source_ref: controlled-fixture-spec.yaml#CF-ANG-001
+    engineering_domain: assembly_orientation
+    verification_method: ANALYSIS_GEOMETRY
+    executor: angle
+    target: motor
+    angle_axis: Z
+    rule:
+      operator: "<="
+      threshold: 2.0
+      unit: deg
+    expected:
+      V1:
+        measured: 0.0
+        status: PASS
+      V2:
+        measured: 0.0
+        status: PASS
+
+mutants:
+  - id: label_only_rename
+    base_version: V2
+    mutation: "battery label changes; stable object ID and assembly path remain unchanged"
+    expected_check_status: PASS
+    expected_regression_status: UNCHANGED
+  - id: path_binding_drift
+    base_version: V2
+    mutation: "battery assembly path changes"
+    expected_check_status: BLOCKED
+    expected_regression_status: NON_COMPARABLE
+  - id: stable_id_binding_drift
+    base_version: V2
+    mutation: "battery stable object ID changes while geometry remains similar"
+    expected_check_status: BLOCKED
+    expected_regression_status: NON_COMPARABLE
+  - id: missing_counterpart
+    base_version: V2
+    mutation: "underbody_bracket is removed"
+    expected_check_status: BLOCKED
+    expected_regression_status: NON_COMPARABLE
+  - id: replaced_target
+    base_version: V2
+    mutation: "battery is replaced by a new object ID with similar geometry"
+    expected_check_status: BLOCKED
+    expected_regression_status: NON_COMPARABLE
+
+required_artifacts:
+  - "STEP files with exact local SHA-256"
+  - "object inventory with stable ID, label, assembly path, shape count and transform"
+  - "binding manifest separate from geometry"
+  - "golden-results.yaml with measured value, status, regression and tolerance"
+  - "at least one evidence preset for CF-CLR-001"

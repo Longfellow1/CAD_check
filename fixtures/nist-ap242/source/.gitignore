@@ -1,0 +1,2 @@
+# Original NIST downloads stay as a local cache; selected STEP files are tracked.
+*.zip

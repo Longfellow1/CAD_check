@@ -1,0 +1,176 @@
+schema: cad-check-fixtures/v0.1
+prepared_at: "2026-09-08"
+repository:
+  base_branch: feat/p1-real-cad
+  base_commit: 11b5173d911714e9301722f608161518d14f3edc
+  purpose: "P1 real CAD test data and supporting evidence only"
+
+datasets:
+  - id: nist_ap242
+    title: "NIST AP242 / PMI test files"
+    status: ready_local
+    role: ap242_fidelity_and_import
+    local_root: fixtures/nist-ap242
+    official_sources:
+      - url: https://www.nist.gov/ctl/smart-connected-systems-division/smart-connected-manufacturing-systems-group/mbe-pmi-0
+        description: "NIST MBE PMI Validation and Conformance Testing landing page"
+      - url: https://www.nist.gov/services-resources/software/step-file-analyzer-and-viewer
+        description: "NIST STEP File Analyzer and Viewer"
+    source_archives:
+      - path: fixtures/nist-ap242/source/NIST-PMI-STEP-Files.zip
+        download_url: https://www.nist.gov/document/nist-pmi-step-files
+        distribution: local_cache_only
+        sha256: 8fa78429e6d8d9b0d7681d223b6aa9ec98c3772185c55b1a0e3679b21c181911
+        size_bytes: 13976599
+      - path: fixtures/nist-ap242/source/NIST-STC-PMI-v4.zip
+        download_url: https://www.nist.gov/document/nist-stc-pmi-v4
+        distribution: local_cache_only
+        sha256: bb4fb9939476542af6e90fd2616b4e897756916494a4c92f11404fc13dd1aba8
+        size_bytes: 51125067
+      - path: fixtures/nist-ap242/source/NIST-MTC-Assembly.zip
+        download_url: https://www.nist.gov/document/nist-cad-models-mtc-assembly
+        distribution: local_cache_only
+        sha256: 9aeb53e54f682ea1732857d06a7f0513c71667a2d84407396325fa6ce5340bbc
+        size_bytes: 15861580
+        use: reference_only
+    selected_assets:
+      - id: nist_stc_06_ap242_e3
+        path: fixtures/nist-ap242/selected/stc/nist_stc_06_asme1_ap242-e3.stp
+        distribution: repository
+        source_archive: NIST-PMI-STEP-Files.zip
+        family: STC
+        schema: AP242
+        edition: 3
+        sha256: 71777c28da76da0e8a667e4cbe792d5f72c09b5c56440c9744d3d50ca96ecc8d
+        size_bytes: 1006401
+      - id: nist_stc_07_ap242_e3
+        path: fixtures/nist-ap242/selected/stc/nist_stc_07_asme1_ap242-e3.stp
+        distribution: repository
+        source_archive: NIST-PMI-STEP-Files.zip
+        family: STC
+        schema: AP242
+        edition: 3
+        sha256: 2dddf9b8894bc241f7ffddf3dc4502baa3d49c374e8784039d14b86473d54832
+        size_bytes: 1945387
+      - id: nist_stc_08_ap242_e3
+        path: fixtures/nist-ap242/selected/stc/nist_stc_08_asme1_ap242-e3.stp
+        distribution: repository
+        source_archive: NIST-PMI-STEP-Files.zip
+        family: STC
+        schema: AP242
+        edition: 3
+        sha256: 64f24b914910ce8e20c9e4bd59637b4fd155715c7c7b51689466534ed7db1442
+        size_bytes: 2251152
+      - id: nist_stc_09_ap242_e3
+        path: fixtures/nist-ap242/selected/stc/nist_stc_09_asme1_ap242-e3.stp
+        distribution: repository
+        source_archive: NIST-PMI-STEP-Files.zip
+        family: STC
+        schema: AP242
+        edition: 3
+        sha256: 737423afcb223b87d92a4ea7646a97d8d55fb21cc24ba2fb72b952336bcf1fad
+        size_bytes: 5287678
+      - id: nist_stc_10_ap242_e2
+        path: fixtures/nist-ap242/selected/stc/nist_stc_10_asme1_ap242-e2.stp
+        distribution: repository
+        source_archive: NIST-PMI-STEP-Files.zip
+        family: STC
+        schema: AP242
+        edition: 2
+        sha256: fba4f46cab1ce1402362038036884631b4a41afe1c9efc5681d358c39db7ed5f
+        size_bytes: 4875056
+      - id: nist_ctc_02_ap242_e2
+        path: fixtures/nist-ap242/selected/assembly/nist_ctc_02_asme1_ap242-e2.stp
+        distribution: repository
+        source_archive: NIST-PMI-STEP-Files.zip
+        family: CTC
+        schema: AP242
+        edition: 2
+        sha256: 99a0a2079ddeb64d05c2432cbe931fa17c89da60d8b0bcb0b11bd0ed94fa2e68
+        size_bytes: 1981342
+      - id: nist_ctc_04_ap242_e1
+        path: fixtures/nist-ap242/selected/assembly/nist_ctc_04_asme1_ap242-e1.stp
+        distribution: repository
+        source_archive: NIST-PMI-STEP-Files.zip
+        family: CTC
+        schema: AP242
+        edition: 1
+        sha256: 20b43b54ce25d4ed17cff794084c406e831c687f5b62471d3371eef33669e355
+        size_bytes: 1287291
+    reference_documents:
+      - path: fixtures/nist-ap242/selected/reference/NIST-PMI-STEP-Files-README.txt
+        distribution: repository
+        sha256: 38370e202d8a765331efb6339b759cac0c21d8eaed42487ec982737ca43c7a2e
+      - path: fixtures/nist-ap242/selected/reference/NIST-STC-PMI-v4-README.txt
+        distribution: repository
+        sha256: 5f17459354dd23a741c67e237b1e4cc50b49f204ed7b21f748e35b5134f471ff
+
+  - id: tabby_evo
+    title: "Open Motors TABBY EVO"
+    status: official_source_verified_download_pending
+    role: vehicle_scale_viewer_and_demo
+    local_root: fixtures/tabby-evo
+    official_sources:
+      - url: https://www.openmotors.co/download/
+        description: "Official TABBY EVO download page"
+      - url: https://creativecommons.org/licenses/by-sa/4.0/
+        description: "CC BY-SA 4.0 license"
+    source_records:
+      - configuration: 4_seats
+        historical_file_id: 0BzybljH3_bNKeTZQeTRGblRyeGM
+        official_release: "2015-06-09"
+        official_md5: 1fe99533fb55bcec6ef2e1ac2073f994
+        current_local_status: "not_downloaded; historical Drive URL returns HTTP 404"
+      - configuration: 2_seats
+        historical_file_id: 1EGHJD5BlLpOcNAuLEXMvbx9nSlF6uJxL
+        official_release: "2015-04"
+        official_md5: e8d95e6a824810249af842cd504123de
+        current_local_status: "not_downloaded; historical Drive URL returns HTTP 404"
+    required_manual_artifacts:
+      - "one official 2-seat or 4-seat STEP source archive"
+      - "download page or license evidence retained beside the archive"
+      - "SHA-256 and byte size recorded after download"
+    restrictions:
+      - "Do not substitute GrabCAD or an unverified mirror."
+      - "Keep Open Motors attribution and CC BY-SA 4.0 notice."
+
+  - id: controlled_automotive_fixture
+    title: "Controlled Automotive Fixture V1/V2"
+    status: contract_ready_step_pending
+    role: regression_binding_evidence_golden_truth
+    local_root: fixtures/controlled
+    contract: fixtures/controlled/controlled-fixture-spec.yaml
+    generator_owner: P1_implementation
+    intended_outputs:
+      - fixtures/controlled/source/controlled_vehicle_v1.stp
+      - fixtures/controlled/source/controlled_vehicle_v2.stp
+      - fixtures/controlled/source/controlled_vehicle_mutants/
+      - fixtures/controlled/source/controlled-fixture-manifest.yaml
+    required_variants:
+      - baseline_v1
+      - candidate_v2_clearance_fail
+      - label_only_rename
+      - path_binding_drift
+      - stable_id_binding_drift
+      - missing_counterpart
+      - replaced_target
+    golden_anchor:
+      case_id: CF-CLR-001
+      executor: minimum_clearance
+      target: battery
+      counterpart: underbody_bracket
+      threshold_mm: 10.0
+      v1_expected_mm: 12.0
+      v1_expected_status: PASS
+      v2_expected_mm: 8.0
+      v2_expected_status: FAIL
+      v1_to_v2_expected_regression: NEW_FAIL
+
+acceptance:
+  all_ready_datasets_must_have:
+    - source_or_license_record
+    - sha256_for_each_step_or_archive
+    - units_and_coordinate_convention
+    - object_inventory_or_binding_contract
+    - expected_status_and_measurement_values
+  no_code_paths_changed_by_data_preparation: true

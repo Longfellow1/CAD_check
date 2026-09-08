@@ -1,0 +1,3 @@
+# STEP files are immutable CAD data; preserve source line endings and hashes.
+*.stp -text -diff
+nist-ap242/selected/reference/*.txt -text -diff
