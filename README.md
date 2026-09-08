@@ -1,73 +1,70 @@
-# CAD Check — Automotive Engineering Verification Capability Prototype
+# CAD Check — Stage-2 STEP / OCCT Capability MVP
 
-A deliberately small MVP for validating whether automotive package-check rules can be expressed as reusable verification cases, executed deterministically, compared across model versions, and reviewed with evidence + trace.
+当前分支：`mvp-v0.2-step-occt`
 
-## What this MVP proves
+本阶段把 v0.1 的 Primitive Demo 推到真实 STEP/OCCT 实验链：
 
-- 3 reusable executor types cover a useful slice of engineering checks: minimum clearance, directional distance, angle/orientation.
-- 18 verification cases can be batch-run against a controlled V1/V2 vehicle fixture.
-- V1/V2 regression is classified as NEW_FAIL / FIXED / IMPROVED / REGRESSED / UNCHANGED.
-- Every result has evidence metadata and a readable trace.
-- A single Web Workspace lets an engineer run, filter, inspect and review results.
-
-## What it deliberately does NOT prove
-
-- CATIA → STEP AP242 production fidelity.
-- Real OEM part semantic binding across versions.
-- Enterprise performance, security, deployment or sign-off.
-- Headroom, visibility, dynamic DMU, CAE or AI rule compilation.
-
-## Quick start
-
-Requires Python 3.10+.
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn server.app:app --reload
+```text
+STEP
+→ STEPCAFControl_Reader / XCAF
+→ Assembly / Occurrence Inventory
+→ Model Readiness
+→ Manual Exact-path Binding
+→ VerificationCase
+→ OCP/OCCT B-Rep Executor
+→ V1/V2 Regression
+→ Evidence + trace.jsonl
+→ ocp-tessellate
+→ three-cad-viewer
 ```
 
-Open: http://127.0.0.1:8000
+## 一键启动
 
-Or:
+要求 Python 3.11、Node.js 20+：
 
 ```bash
+./scripts/bootstrap.sh
 ./start.sh
 ```
 
-## Run tests
+浏览器打开 `http://127.0.0.1:8000`。
+
+`bootstrap.sh` 使用 `pip --isolated`，避免本机 `global.user=true` 等 pip 用户配置污染。
+
+## 核心命令
 
 ```bash
-pytest -q
+python tools/generate_step_fixture.py   # 生成 V1/V2 XCAF STEP
+python tools/readiness.py               # STEP / BRep / Binding / pair readiness
+python tools/run_step_demo.py           # 真实 OCP 回归
+python tools/register_model.py model.step --model-id public_vehicle --version V1
+pytest -q tests/test_stage2_step.py
 ```
 
-## MVP structure
+## 当前已经进入代码的能力
 
-```text
-server/   deterministic verification runtime + API
-rules/    hand-authored verification cases
-web/      single-page verification workspace
-tests/    regression + geometry tests
-docs/     product plan and MVP validation notes
-```
+- `STEPCAFControl_Reader` + XCAF Assembly/Occurrence tree；
+- STEP schema / source unit / BRep validity / empty shape / duplicate bbox / coordinate contract Readiness；
+- 人工 exact occurrence-path Binding；
+- `BRepExtrema_DistShapeShape` Minimum Clearance + 最近点；
+- Directional Distance（当前明确标记为 `bbox_axis_extrema` 近似）；
+- XCAF occurrence transform 的 Angle / Orientation；
+- 18 条现有 VerificationCase 对真实重新导入 STEP 执行；
+- V1/V2 Regression；
+- `result.json`、`trace.jsonl`、Evidence PNG 落盘；
+- `ocp-tessellate` → `three-cad-viewer` WebGL Viewer；
+- CI 中安装 OCP、生成 STEP、重新导入、执行测试和构建 Web。
 
-## Architecture
+## Controlled Fixture 的意义
 
-```text
-Controlled Vehicle Fixture V1 / V2
-          ↓
-Hand-authored Verification Cases
-          ↓
-3 deterministic executors
-          ↓
-PASS / FAIL / REVIEW_REQUIRED / BLOCKED
-          ↓
-V1 ↔ V2 Regression
-          ↓
-Evidence metadata + Trace
-          ↓
-Web Verification Workspace
-```
+Controlled Fixture 不是绕过 STEP：几何先由 OCP/XCAF 写出 STEP，然后应用再次通过 STEPCAF/XCAF Reader 导入，所有 Check 都对重新导入的 TopoDS Shape 执行。因此它可以验证 STEP Boundary、OCP Geometry、Binding、Regression、Evidence 的代码闭环。
 
-The geometry backend is intentionally primitive-based for the first capability prototype. `server/occt_adapter.py` defines the seam for replacing primitive geometry with OCP/OCCT + STEP/XCAF without changing the verification-case or regression contracts.
+## 仍然不宣称
+
+- CATIA → AP242 企业保真度已验证；
+- 真实车型 Binding Reuse Rate 已验证；
+- Directional Distance 当前近似等于企业正式测量方法；
+- Headroom / Visibility / Dynamic DMU 已支持；
+- 当前结果可用于量产工程签核。
+
+这些仍然属于真实企业数据 Pilot 要回答的问题。

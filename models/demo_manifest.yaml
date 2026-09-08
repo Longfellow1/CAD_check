@@ -1,0 +1,12 @@
+binding_file: bindings/demo_bindings.yaml
+models:
+  V1:
+    model_id: controlled_vehicle
+    version: V1
+    step: data/step/vehicle_v1.step
+    coordinate_contract: X-forward/Y-left/Z-up
+  V2:
+    model_id: controlled_vehicle
+    version: V2
+    step: data/step/vehicle_v2.step
+    coordinate_contract: X-forward/Y-left/Z-up

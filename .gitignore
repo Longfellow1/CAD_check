@@ -1,5 +1,9 @@
-.venv/
 __pycache__/
-.pytest_cache/
 *.pyc
+.venv/
+.pytest_cache/
+.cadcheck/
+data/step/*.step
+web/node_modules/
+web/dist/
 .DS_Store

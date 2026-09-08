@@ -1,9 +1,1 @@
-<!doctype html>
-<html lang="zh-CN">
-<head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>CAD Check MVP</title><link rel="stylesheet" href="/static/style.css"/></head>
-<body>
-<header class="topbar"><div><div class="brand">CAD Check</div><div class="sub">Engineering Verification Capability Prototype</div></div><div class="versions"><span>Baseline <b>V1</b></span><span>Candidate <b>V2</b></span><button id="runBtn">Run Verification</button></div></header>
-<main><section id="summary" class="summary"></section><section class="workspace"><aside class="left"><div class="panel-title">Verification Cases</div><div id="filters" class="filters"></div><div id="caseList" class="case-list"></div></aside><section class="center"><div class="viewer-head"><span>3D Evidence</span><span id="viewerHint" class="muted">Select a case</span></div><canvas id="canvas"></canvas><div id="measureLabel" class="measure-label hidden"></div></section><aside class="right"><div class="panel-title">Check Detail</div><div id="detail" class="detail empty">选择左侧校验项查看 V1/V2、规则、Evidence 和 Trace。</div></aside></section></main>
-<dialog id="traceDialog"><div class="dialog-head"><b>Execution Trace</b><button onclick="traceDialog.close()">Close</button></div><pre id="traceText"></pre></dialog>
-<script type="module" src="/static/app.js"></script>
-</body></html>
+<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CAD Check STEP/OCCT MVP</title></head><body><div id="app"></div><script type="module" src="/src/main.js"></script></body></html>

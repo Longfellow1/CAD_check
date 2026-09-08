@@ -1,0 +1,13 @@
+bindings:
+  battery: {V1: /Vehicle/battery, V2: /Vehicle/battery}
+  underbody_bracket: {V1: /Vehicle/underbody_bracket, V2: /Vehicle/underbody_bracket}
+  left_rail: {V1: /Vehicle/left_rail, V2: /Vehicle/left_rail}
+  right_rail: {V1: /Vehicle/right_rail, V2: /Vehicle/right_rail}
+  motor: {V1: /Vehicle/motor, V2: /Vehicle/motor}
+  motor_bracket: {V1: /Vehicle/motor_bracket, V2: /Vehicle/motor_bracket}
+  controller: {V1: /Vehicle/controller, V2: /Vehicle/controller}
+  controller_bracket: {V1: /Vehicle/controller_bracket, V2: /Vehicle/controller_bracket}
+  exhaust: {V1: /Vehicle/exhaust, V2: /Vehicle/exhaust}
+  front_crossmember: {V1: /Vehicle/front_crossmember, V2: /Vehicle/front_crossmember}
+  ground_ref: {V1: /Vehicle/ground_ref, V2: /Vehicle/ground_ref}
+  rear_module: {V1: /Vehicle/rear_module, V2: /Vehicle/rear_module}
