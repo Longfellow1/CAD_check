@@ -1,9 +1,9 @@
 <!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>CAD Check MVP</title><link rel="stylesheet" href="/static/style.css"/></head>
+<head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>CAD 校核 MVP</title><link rel="stylesheet" href="/static/style.css"/></head>
 <body>
-<header class="topbar"><div><div class="brand">CAD Check</div><div class="sub">Engineering Verification Capability Prototype</div></div><div class="versions"><span>Baseline <b>V1</b></span><span>Candidate <b>V2</b></span><button id="runBtn">Run Verification</button></div></header>
-<main><section id="summary" class="summary"></section><section class="workspace"><aside class="left"><div class="panel-title">Verification Cases</div><div id="filters" class="filters"></div><div id="caseList" class="case-list"></div></aside><section class="center"><div class="viewer-head"><span>3D Evidence</span><span id="viewerHint" class="muted">Select a case</span></div><canvas id="canvas"></canvas><div id="measureLabel" class="measure-label hidden"></div></section><aside class="right"><div class="panel-title">Check Detail</div><div id="detail" class="detail empty">选择左侧校验项查看 V1/V2、规则、Evidence 和 Trace。</div></aside></section></main>
-<dialog id="traceDialog"><div class="dialog-head"><b>Execution Trace</b><button onclick="traceDialog.close()">Close</button></div><pre id="traceText"></pre></dialog>
+<header class="topbar"><div><div class="brand">CAD 校核</div><div class="sub">汽车工程校核能力原型</div></div><div class="versions"><span>基线版本 <b>V1</b></span><span>候选版本 <b>V2</b></span><button id="runBtn">运行校核</button></div></header>
+<main><section id="summary" class="summary"></section><section class="workspace"><aside class="left"><div class="panel-title">校核项</div><div id="filters" class="filters"></div><div id="caseList" class="case-list"></div></aside><section class="center"><div class="viewer-head"><span>三维证据</span><span id="viewerHint" class="muted">请选择一个校核项</span></div><canvas id="canvas"></canvas><div id="measureLabel" class="measure-label hidden"></div></section><aside class="right"><div class="panel-title">校核详情</div><div id="detail" class="detail empty">选择左侧校核项，查看 V1/V2 对比、规则、证据和执行追溯。</div></aside></section></main>
+<dialog id="traceDialog"><div class="dialog-head"><b>执行追溯</b><button onclick="traceDialog.close()">关闭</button></div><pre id="traceText"></pre></dialog>
 <script type="module" src="/static/app.js"></script>
 </body></html>
