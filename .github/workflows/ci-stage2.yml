@@ -1,14 +1,13 @@
-name: Stage-2 STEP OCCT CI
+name: CAD Integration CI
 
 on:
   push:
     branches:
-      - mvp-v0.2-step-occt
-      - gpt/mvp-real-cad-p0
+      - main
   pull_request:
 
 jobs:
-  stage2:
+  cad-integration:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -35,6 +34,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cad-check-stage2-evidence
+          name: cad-check-integration-evidence
           path: .cadcheck/runs
           if-no-files-found: ignore
