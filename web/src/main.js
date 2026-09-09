@@ -3,6 +3,7 @@ import 'three-cad-viewer/css';
 import './style.css';
 
 const LABELS = {
+  MEASURED: '已测量',
   NEW_FAIL: '新增不满足',
   FIXED: '已修复',
   IMPROVED: '改善',
@@ -12,13 +13,32 @@ const LABELS = {
   PASS: '满足',
   FAIL: '不满足',
   BLOCKED: '无法执行',
-  REVIEW_REQUIRED: '需复核',
+  REVIEW_REQUIRED: '需工程复核',
+};
+
+const MODES = {
+  EXPLORE_MEASURE: {
+    label: '快速测量',
+    hint: '选对象、测几何，只输出测量证据，不做工程判定。',
+  },
+  ENGINEERING_CHECK: {
+    label: '工程校验',
+    hint: '选择版本化 Check Card，按规则输出结果和证据。',
+  },
+  REGRESSION_COMPARE: {
+    label: '版本回归',
+    hint: '复用同一组校验，比较 V1/V2 的风险变化。',
+  },
 };
 
 const state = {
+  mode: 'REGRESSION_COMPARE',
   run: null,
   selected: null,
   model: 'V2',
+  models: {},
+  cards: [],
+  inventory: {},
   viewer: null,
   display: null,
   viewerReady: false,
@@ -29,26 +49,32 @@ const root = document.querySelector('#app');
 root.innerHTML = `
   <header>
     <b>CAD Check</b>
-    <span>STEP / OCCT 能力验证 MVP</span>
+    <span>STEP / OCCT 三种校验模式 MVP</span>
     <i id="sys" class="status" role="status">正在检查运行环境…</i>
   </header>
   <nav class="toolbar">
-    <button id="run" class="primary">1. 运行 V1 → V2 校核</button>
+    <div id="mode-tabs" class="mode-tabs" aria-label="校验模式">
+      ${Object.entries(MODES).map(([id, item]) => `
+        <button class="mode-tab" data-mode="${id}">${item.label}</button>
+      `).join('')}
+    </div>
+    <button id="run" class="primary">运行版本回归</button>
     <button id="v1" class="model-button">查看 V1</button>
     <button id="v2" class="model-button selected">查看 V2</button>
     <span id="rid" class="run-id">尚未运行</span>
   </nav>
+  <section id="mode-config" class="mode-config"></section>
   <section id="guide" class="guide" aria-label="手测步骤">
-    <div class="step active" data-step="run"><b>1</b><span>运行校核</span><small>生成 V1/V2 结果</small></div>
-    <div class="step" data-step="model"><b>2</b><span>检查三维</span><small>切换版本、定位对象</small></div>
-    <div class="step" data-step="evidence"><b>3</b><span>复核证据</span><small>测量线和 Trace</small></div>
+    <div class="step active" data-step="run"><b>1</b><span>运行校验</span><small>生成当前模式结果</small></div>
+    <div class="step" data-step="model"><b>2</b><span>检查三维</span><small>定位对象和测量位置</small></div>
+    <div class="step" data-step="evidence"><b>3</b><span>复核证据</span><small>测量线、数值和 Trace</small></div>
     <div class="step" data-step="save"><b>4</b><span>保存证据</span><small>导出 Evidence PNG</small></div>
   </section>
   <section id="sum" class="summary"></section>
   <main>
     <aside class="panel cases-panel">
-      <h3>校核项</h3>
-      <p class="hint">先运行校核，再选择案例进入三维复核。</p>
+      <h3>校验结果</h3>
+      <p id="mode-hint" class="hint">先选择模式并运行。</p>
       <div id="cases"><div class="empty">尚未运行</div></div>
     </aside>
     <section class="viewer panel">
@@ -56,14 +82,14 @@ root.innerHTML = `
       <div id="cad"><div class="viewer-empty">正在加载三维数据…</div></div>
     </section>
     <aside class="detail panel">
-      <h3>手测详情</h3>
+      <h3>运行详情</h3>
       <div id="detail">
         <p class="hint">手测顺序：</p>
         <ol class="manual-list">
-          <li>运行 V1 → V2 校核</li>
-          <li>选择一个新增不满足项</li>
-          <li>确认对象、版本和测量线</li>
-          <li>打开 Trace 并保存 PNG</li>
+          <li>选择一种校验模式</li>
+          <li>运行校验并选择结果</li>
+          <li>确认对象、测量线和规则来源</li>
+          <li>查看 Trace 并保存 Evidence PNG</li>
         </ol>
       </div>
     </aside>
@@ -111,7 +137,7 @@ function resetSteps() {
 function setBusy(value) {
   state.busy = value;
   $('#run').disabled = value;
-  $('#run').textContent = value ? '正在运行…' : '1. 运行 V1 → V2 校核';
+  $('#run').textContent = value ? '正在运行…' : `运行${MODES[state.mode].label}`;
 }
 
 function ensureViewer() {
@@ -130,12 +156,30 @@ function ensureViewer() {
   state.viewer = new Viewer(state.display, {tools: true}, () => {});
 }
 
-function setModelButton(model) {
+function setModel(model) {
   state.model = model;
   for (const key of ['V1', 'V2']) {
-    $(`#v${key.slice(1)}`).classList.toggle('selected', key === model);
+    const button = $(`#v${key.slice(1)}`);
+    if (button) button.classList.toggle('selected', key === model);
   }
-  $('#vt').textContent = `真实 STEP 三维视图 · ${model}`;
+  $('#vt').textContent = `${state.model} · ${state.selected || '真实 STEP 三维视图'}`;
+}
+
+function renderEvidenceOverlay(row) {
+  document.querySelector('.evidence-overlay')?.remove();
+  if (!row) return;
+  const execution = row.execution;
+  const focus = execution.evidence?.focus_ids || [];
+  const overlay = document.createElement('div');
+  overlay.className = 'evidence-overlay';
+  overlay.innerHTML = `
+    <b>${row.title}</b>
+    <span>A：${focus[0] || '—'}</span>
+    <span>B：${focus[1] || '—'}</span>
+    <strong>${execution.evidence?.annotation || `${execution.value ?? '—'} ${execution.unit || ''}`}</strong>
+    <em>${LABELS[row.outcome] || row.outcome}</em>
+  `;
+  $('#cad').append(overlay);
 }
 
 async function renderViewer() {
@@ -161,46 +205,264 @@ async function renderViewer() {
   state.viewer.presetCamera?.('iso');
   state.viewerReady = true;
   setStep('model', 'done');
-  if (state.run && state.selected) setStep('evidence', 'done');
+  if (state.run && state.selected) {
+    const row = currentRows().find((item) => item.caseId === state.selected);
+    renderEvidenceOverlay(row);
+    setStep('evidence', 'done');
+  } else {
+    renderEvidenceOverlay(null);
+  }
   setStatus(`${state.model} 三维已加载`, 'ok');
 }
 
-function renderSummary() {
-  const counts = {
-    NEW_FAIL: 0,
-    FIXED: 0,
-    IMPROVED: 0,
-    REGRESSED: 0,
-    UNCHANGED: 0,
-    NON_COMPARABLE: 0,
-  };
-  for (const item of state.run.regression) counts[item.regression]++;
-  $('#sum').innerHTML = Object.entries(counts)
-    .map(([key, value]) => `<div><strong>${value}</strong><span>${LABELS[key]}</span></div>`)
+function fillModelSelect(select, selected = state.model) {
+  select.innerHTML = Object.entries(state.models)
+    .map(([key, model]) => `<option value="${key}" ${key === selected ? 'selected' : ''}>${key} · ${model.model_id}</option>`)
     .join('');
 }
 
+async function loadInventory(model) {
+  if (!state.inventory[model]) {
+    state.inventory[model] = await api(`/api/models/${model}/inventory`);
+  }
+  return state.inventory[model];
+}
+
+function objectChoices(model) {
+  const inventory = state.inventory[model];
+  if (!inventory) return [];
+  const choices = [];
+  for (const occurrence of inventory.occurrences) {
+    if (occurrence.children > 0) continue;
+    choices.push({value: {path: occurrence.path}, label: occurrence.path});
+    for (const kind of ['shell', 'face']) {
+      for (const item of (occurrence.subshapes?.[kind] || [])) {
+        choices.push({
+          value: {path: occurrence.path, selector: item.selector},
+          label: `${occurrence.path}#${kind}[${item.selector.index}]`,
+        });
+      }
+    }
+  }
+  return choices;
+}
+
+function fillObjectSelect(select, choices, preferredText = '') {
+  select.innerHTML = '';
+  for (const choice of choices) {
+    const option = document.createElement('option');
+    option.value = JSON.stringify(choice.value);
+    option.textContent = choice.label;
+    select.append(option);
+  }
+  const preferred = choices.findIndex((choice) => choice.label.includes(preferredText));
+  if (preferred >= 0) select.selectedIndex = preferred;
+}
+
+function renderCardPreview(card) {
+  const preview = $('#card-preview');
+  if (!preview || !card) return;
+  const rule = card.rule || {};
+  preview.innerHTML = `
+    <b>${card.title}</b>
+    <span>${card.engineering_domain} · ${card.verification_method} · ${card.executor}</span>
+    <span>权限：${rule.authority || '—'} · ${rule.operator || '—'} ${rule.threshold ?? ''} ${rule.unit || ''}</span>
+    <small>${card.source_ref}</small>
+  `;
+}
+
+async function renderModeConfig() {
+  const mode = state.mode;
+  $('#mode-hint').textContent = MODES[mode].hint;
+  $('#mode-tabs').querySelectorAll('.mode-tab').forEach((button) => {
+    button.classList.toggle('selected', button.dataset.mode === mode);
+  });
+  $('#run').textContent = `运行${MODES[mode].label}`;
+
+  if (mode === 'EXPLORE_MEASURE') {
+    $('#mode-config').innerHTML = `
+      <div class="mode-title"><b>快速测量</b><span>无 Rule、无 PASS/FAIL，只保存测量事实和 Evidence。</span></div>
+      <label>模型<select id="explore-model"></select></label>
+      <label>对象 A<select id="explore-a"></select></label>
+      <label>对象 B<select id="explore-b"></select></label>
+      <label>方法<select id="explore-executor"><option value="minimum_clearance">minimum_clearance</option><option value="directional_distance">directional_distance</option><option value="angle">angle</option></select></label>
+      <label id="explore-axis-field">方向<select id="explore-axis"><option value="Z">Z</option><option value="X">X</option><option value="Y">Y</option></select></label>
+      <label id="explore-angle-axis-field">角度轴<select id="explore-angle-axis"><option value="Z">Z</option><option value="X">X</option><option value="Y">Y</option></select></label>
+    `;
+    const modelSelect = $('#explore-model');
+    const executorSelect = $('#explore-executor');
+    const updateExploreInputs = () => {
+      $('#explore-axis-field').hidden = executorSelect.value !== 'directional_distance';
+      $('#explore-angle-axis-field').hidden = executorSelect.value !== 'angle';
+    };
+    fillModelSelect(modelSelect);
+    const fillObjects = async () => {
+      const model = modelSelect.value;
+      state.model = model;
+      const choices = objectChoices(model) || [];
+      fillObjectSelect($('#explore-a'), choices, 'battery');
+      fillObjectSelect($('#explore-b'), choices, 'underbody_bracket');
+    };
+    await loadInventory(modelSelect.value);
+    await fillObjects();
+    executorSelect.onchange = updateExploreInputs;
+    updateExploreInputs();
+    modelSelect.onchange = async () => {
+      await loadInventory(modelSelect.value);
+      await fillObjects();
+      await switchModel(modelSelect.value);
+    };
+  } else if (mode === 'ENGINEERING_CHECK') {
+    $('#mode-config').innerHTML = `
+      <div class="mode-title"><b>工程规则校验</b><span>规则来自 Check Card Registry；Provisional 只能进入需复核。</span></div>
+      <label>模型<select id="check-model"></select></label>
+      <label>Check Card<select id="check-card"></select></label>
+      <div id="card-preview" class="card-preview"></div>
+      <div id="binding-editor" class="binding-editor"></div>
+    `;
+    const modelSelect = $('#check-model');
+    const cardSelect = $('#check-card');
+    fillModelSelect(modelSelect);
+    cardSelect.innerHTML = state.cards
+      .map((card) => `<option value="${card.id}">${card.id} · ${card.title}</option>`)
+      .join('');
+    const refreshBindings = async () => {
+      const card = state.cards.find((item) => item.id === cardSelect.value);
+      const model = modelSelect.value;
+      renderCardPreview(card);
+      await loadInventory(model);
+      const current = await api(`/api/bindings?model=${encodeURIComponent(model)}`);
+      const choices = objectChoices(model);
+      const required = card?.required_bindings || [];
+      $('#binding-editor').innerHTML = `
+        <span class="binding-title">人工 Binding（选择后保存）</span>
+        ${required.map((semanticId) => `
+          <label data-binding-row="${semanticId}">${semanticId}<select data-binding-id="${semanticId}"></select></label>
+        `).join('')}
+        <button id="save-bindings" type="button">保存 Binding</button>
+      `;
+      for (const semanticId of required) {
+        const select = document.querySelector(`[data-binding-id="${semanticId}"]`);
+        fillObjectSelect(select, choices);
+        const existing = current.bindings?.[semanticId];
+        const path = typeof existing === 'string' ? existing : existing?.path;
+        const selector = typeof existing === 'object' ? existing?.selector : null;
+        const preferred = choices.findIndex((choice) => {
+          const value = choice.value;
+          return value.path === path && JSON.stringify(value.selector || null) === JSON.stringify(selector || null);
+        });
+        if (preferred >= 0) select.selectedIndex = preferred;
+      }
+      $('#save-bindings').onclick = async () => {
+        const bindings = {};
+        for (const semanticId of required) {
+          const select = document.querySelector(`[data-binding-id="${semanticId}"]`);
+          bindings[semanticId] = JSON.parse(select.value);
+        }
+        try {
+          const saved = await api('/api/bindings', {
+            method: 'POST',
+            headers: {'content-type': 'application/json'},
+            body: JSON.stringify({model, bindings}),
+          });
+          setStatus(`Binding 已保存：${Object.keys(saved.validation.ok || {}).length} 项`, 'ok');
+        } catch (error) {
+          setStatus(`Binding 保存失败：${error.message}`, 'error');
+        }
+      };
+    };
+    await refreshBindings();
+    cardSelect.onchange = refreshBindings;
+    modelSelect.onchange = async () => {
+      await refreshBindings();
+      await switchModel(modelSelect.value);
+    };
+  } else {
+    $('#mode-config').innerHTML = `
+      <div class="mode-title"><b>版本回归</b><span>沿用现有 V1/V2 回归内核，失败绑定会阻断比较。</span></div>
+      <label>回归范围<select id="regression-scope">
+        <option value="legacy">兼容案例集（18 条）</option>
+        <option value="mvp">本轮受控 Cards（3 条）</option>
+      </select></label>
+      <span class="mode-note">默认显示候选版本 V2；可点击查看 V1。</span>
+    `;
+  }
+}
+
+function renderSummary() {
+  if (!state.run) {
+    $('#sum').innerHTML = '';
+    return;
+  }
+  if (state.run.regression) {
+    const counts = {};
+    for (const item of state.run.regression) counts[item.regression] = (counts[item.regression] || 0) + 1;
+    $('#sum').innerHTML = Object.entries(counts)
+      .map(([key, value]) => `<div><strong>${value}</strong><span>${LABELS[key] || key}</span></div>`)
+      .join('');
+    return;
+  }
+  const execution = state.run.execution;
+  const status = execution?.status || '—';
+  $('#sum').innerHTML = `<div><strong>${LABELS[status] || status}</strong><span>${MODES[state.run.mode]?.label || '运行结果'}</span></div>`;
+}
+
+function currentRows() {
+  if (!state.run) return [];
+  if (state.run.regression) {
+    return state.run.regression.map((item) => ({
+      caseId: item.case_id,
+      title: item.title,
+      outcome: item.regression,
+      item,
+      execution: state.model === 'V1' ? item.baseline : item.candidate,
+      definition: state.run.cases.find((definition) => definition.id === item.case_id),
+    }));
+  }
+  return [{
+    caseId: state.run.execution.case_id,
+    title: state.run.execution.title,
+    outcome: state.run.execution.status,
+    item: state.run.execution,
+    execution: state.run.execution,
+    definition: state.run.case,
+  }];
+}
+
 function renderCaseList() {
-  $('#cases').innerHTML = state.run.regression.map((item) => `
-    <button class="case ${item.case_id === state.selected ? 'selected' : ''}" data-id="${item.case_id}">
-      <span>${item.title}</span><b class="tag-${item.regression}">${LABELS[item.regression]}</b>
+  const rows = currentRows();
+  $('#cases').innerHTML = rows.map((row) => `
+    <button class="case ${row.caseId === state.selected ? 'selected' : ''}" data-id="${row.caseId}">
+      <span>${row.title}</span><b class="tag-${row.outcome}">${LABELS[row.outcome] || row.outcome}</b>
     </button>
-  `).join('');
+  `).join('') || '<div class="empty">没有结果</div>';
   document.querySelectorAll('.case').forEach((button) => {
     button.onclick = () => selectCase(button.dataset.id);
   });
 }
 
-function renderDetail(item, definition) {
+function renderDetail(row) {
+  const item = row.item;
+  const execution = row.execution;
+  const definition = row.definition || {};
+  const authority = execution.rule_authority || definition.rule?.authority || '—';
+  const source = definition.source_ref || '—';
+  const regressionFacts = row.item.baseline ? `
+      <dt>V1</dt><dd>${row.item.baseline.value ?? '—'} ${row.item.baseline.unit} · ${LABELS[row.item.baseline.status]}</dd>
+      <dt>V2</dt><dd>${row.item.candidate.value ?? '—'} ${row.item.candidate.unit} · ${LABELS[row.item.candidate.status]}</dd>
+      <dt>变化量</dt><dd>${row.item.delta ?? '—'} ${row.item.candidate.unit}</dd>
+  ` : `
+      <dt>测量值</dt><dd>${execution.value ?? '—'} ${execution.unit}</dd>
+      <dt>运行模式</dt><dd>${MODES[execution.mode]?.label || execution.mode}</dd>
+  `;
   $('#detail').innerHTML = `
-    <h2>${item.title}</h2>
-    <p class="result ${item.regression}"><b>${LABELS[item.regression]}</b></p>
+    <h2>${row.title}</h2>
+    <p class="result ${row.outcome}"><b>${LABELS[row.outcome] || row.outcome}</b></p>
     <dl class="facts">
-      <dt>执行器</dt><dd>${definition.executor}</dd>
-      <dt>V1</dt><dd>${item.baseline.value ?? '—'} ${item.baseline.unit} · ${LABELS[item.baseline.status]}</dd>
-      <dt>V2</dt><dd>${item.candidate.value ?? '—'} ${item.candidate.unit} · ${LABELS[item.candidate.status]}</dd>
-      <dt>变化量</dt><dd>${item.delta ?? '—'} ${item.candidate.unit}</dd>
-      <dt>规则来源</dt><dd>${definition.source_ref}</dd>
+      <dt>执行器</dt><dd>${definition.executor || execution.executor}</dd>
+      <dt>规则权限</dt><dd>${authority}</dd>
+      ${regressionFacts}
+      <dt>规则来源</dt><dd>${source}</dd>
     </dl>
     <div class="detail-actions">
       <button id="trace">查看 Trace</button>
@@ -208,13 +470,13 @@ function renderDetail(item, definition) {
     </div>
     <pre id="out" aria-live="polite"></pre>
   `;
-  $('#measure').textContent = item.candidate.evidence.annotation || '';
+  $('#measure').textContent = execution.evidence?.annotation || '';
   $('#trace').onclick = async () => {
     try {
       const text = await api(`/api/runs/${state.run.run_id}/trace`);
       const lines = typeof text === 'string' ? text : JSON.stringify(text, null, 2);
       $('#out').textContent = lines.split('\n')
-        .filter((line) => line.includes(`"case_id": "${item.case_id}"`))
+        .filter((line) => line.includes(`"case_id": "${row.caseId}"`))
         .join('\n') || lines;
       setStep('evidence', 'done');
       setStatus('Trace 已加载', 'ok');
@@ -228,10 +490,37 @@ function renderDetail(item, definition) {
     try {
       if (!state.viewerReady) throw new Error('请先完成三维加载');
       const image = await state.viewer.getImage('evidence');
-      const saved = await api(`/api/runs/${state.run.run_id}/evidence/${item.case_id}/screenshot`, {
+      const source = new Image();
+      source.src = image.dataUrl;
+      await new Promise((resolve, reject) => {
+        source.onload = resolve;
+        source.onerror = reject;
+      });
+      const canvas = document.createElement('canvas');
+      canvas.width = source.naturalWidth || source.width;
+      canvas.height = source.naturalHeight || source.height;
+      const context = canvas.getContext('2d');
+      context.drawImage(source, 0, 0);
+      context.fillStyle = 'rgba(255, 255, 255, 0.92)';
+      context.fillRect(18, 18, 330, 116);
+      context.fillStyle = '#172033';
+      context.font = 'bold 18px sans-serif';
+      context.fillText(row.title, 32, 44);
+      context.font = '14px sans-serif';
+      context.fillText(`A: ${execution.evidence?.focus_ids?.[0] || '—'}`, 32, 68);
+      context.fillText(`B: ${execution.evidence?.focus_ids?.[1] || '—'}`, 32, 88);
+      context.fillText(`Value: ${execution.evidence?.annotation || '—'}`, 32, 108);
+      context.font = 'bold 14px sans-serif';
+      const negative = ['FAIL', 'NEW_FAIL', 'REGRESSED', 'BLOCKED'];
+      const review = ['REVIEW_REQUIRED', 'NON_COMPARABLE'];
+      context.fillStyle = negative.includes(row.outcome)
+        ? '#b91c1c'
+        : review.includes(row.outcome) ? '#a16207' : '#166534';
+      context.fillText(`Status: ${LABELS[row.outcome] || row.outcome}`, 32, 128);
+      const saved = await api(`/api/runs/${state.run.run_id}/evidence/${row.caseId}/screenshot`, {
         method: 'POST',
         headers: {'content-type': 'application/json'},
-        body: JSON.stringify({data_url: image.dataUrl}),
+        body: JSON.stringify({data_url: canvas.toDataURL('image/png')}),
       });
       $('#shot').textContent = `已保存 ${saved.bytes} bytes`;
       setStep('save', 'done');
@@ -245,14 +534,12 @@ function renderDetail(item, definition) {
 }
 
 async function selectCase(caseId) {
-  if (!state.run) return;
-  const item = state.run.regression.find((entry) => entry.case_id === caseId);
-  const definition = state.run.cases.find((entry) => entry.id === caseId);
-  if (!item || !definition) return;
+  const row = currentRows().find((item) => item.caseId === caseId);
+  if (!row) return;
   state.selected = caseId;
   renderCaseList();
-  renderDetail(item, definition);
-  $('#vt').textContent = `${state.model} · ${item.title}`;
+  renderDetail(row);
+  $('#vt').textContent = `${state.model} · ${row.title}`;
   setStep('evidence', 'active');
   try {
     await renderViewer();
@@ -265,31 +552,72 @@ async function selectCase(caseId) {
   }
 }
 
-async function runChecks() {
+function parseSelectedObject(selectId) {
+  return JSON.parse($(selectId).value);
+}
+
+async function runMode() {
   if (state.busy) return;
   setBusy(true);
   resetSteps();
   state.run = null;
   state.selected = null;
   state.viewerReady = false;
-  $('#cases').innerHTML = '<div class="empty">正在运行真实 STEP 校核…</div>';
+  $('#cases').innerHTML = '<div class="empty">正在运行…</div>';
   $('#detail').innerHTML = '<p class="hint">正在生成结果和证据…</p>';
-  setStatus('正在运行 V1 → V2 校核…', 'working');
+  setStatus(`正在运行${MODES[state.mode].label}…`, 'working');
   try {
-    state.run = await api('/api/runs/regression', {
-      method: 'POST',
-      headers: {'content-type': 'application/json'},
-      body: JSON.stringify({baseline: 'V1', candidate: 'V2'}),
-    });
-    $('#rid').textContent = `Run ${state.run.run_id}`;
+    let response;
+    if (state.mode === 'EXPLORE_MEASURE') {
+      const model = $('#explore-model').value;
+      state.model = model;
+      response = await api('/api/runs/explore', {
+        method: 'POST',
+        headers: {'content-type': 'application/json'},
+        body: JSON.stringify({
+          model,
+          target: 'explore_a',
+          counterpart: 'explore_b',
+          executor: $('#explore-executor').value,
+          axis: $('#explore-axis')?.value || null,
+          angle_axis: $('#explore-angle-axis')?.value || null,
+          bindings: {
+            bindings: {
+              explore_a: {default: parseSelectedObject('#explore-a')},
+              explore_b: {default: parseSelectedObject('#explore-b')},
+            },
+          },
+        }),
+      });
+    } else if (state.mode === 'ENGINEERING_CHECK') {
+      const model = $('#check-model').value;
+      state.model = model;
+      response = await api('/api/runs/check', {
+        method: 'POST',
+        headers: {'content-type': 'application/json'},
+        body: JSON.stringify({model, card_id: $('#check-card').value}),
+      });
+    } else {
+      const scope = $('#regression-scope')?.value;
+      const caseIds = scope === 'mvp'
+        ? ['CLR_BAT_BRACKET', 'DIR_BAT_GROUND', 'ANG_MOTOR_YAW']
+        : null;
+      response = await api('/api/runs/regression', {
+        method: 'POST',
+        headers: {'content-type': 'application/json'},
+        body: JSON.stringify({baseline: 'V1', candidate: 'V2', case_ids: caseIds}),
+      });
+    }
+    state.run = response;
+    $('#rid').textContent = `Run ${response.run_id}`;
     renderSummary();
     setStep('run', 'done');
-    const first = state.run.regression.find((item) => item.regression === 'NEW_FAIL') || state.run.regression[0];
-    setStatus(`校核完成：${state.run.regression.length} 项`, 'ok');
-    await selectCase(first.case_id);
+    const first = currentRows().find((row) => row.outcome === 'NEW_FAIL') || currentRows()[0];
+    setStatus(`校验完成：${MODES[state.mode].label}`, 'ok');
+    if (first) await selectCase(first.caseId);
   } catch (error) {
     setStep('run', 'error');
-    setStatus(`校核失败：${error.message}`, 'error');
+    setStatus(`校验失败：${error.message}`, 'error');
     $('#cases').innerHTML = `<div class="empty error-text">${error.message}</div>`;
   } finally {
     setBusy(false);
@@ -297,7 +625,7 @@ async function runChecks() {
 }
 
 async function switchModel(model) {
-  setModelButton(model);
+  setModel(model);
   try {
     await renderViewer();
   } catch (error) {
@@ -307,12 +635,29 @@ async function switchModel(model) {
   }
 }
 
+async function switchMode(mode) {
+  if (state.busy) return;
+  state.mode = mode;
+  state.run = null;
+  state.selected = null;
+  $('#rid').textContent = '尚未运行';
+  $('#sum').innerHTML = '';
+  $('#cases').innerHTML = '<div class="empty">尚未运行</div>';
+  $('#detail').innerHTML = '<p class="hint">选择配置并运行校验。</p>';
+  resetSteps();
+  await renderModeConfig();
+  setModel(state.model);
+  await renderViewer();
+}
+
 async function boot() {
   try {
     const readiness = await api('/api/system/readiness');
-    const models = await api('/api/models');
-    if (!models.V1 || !models.V2) throw new Error('缺少 V1/V2 模型，请先运行 bootstrap');
+    state.models = await api('/api/models');
+    state.cards = await api('/api/check-cards');
+    if (!state.models.V1 || !state.models.V2) throw new Error('缺少 V1/V2 模型，请先运行 bootstrap');
     setStatus(`运行环境 READY · OCP ${readiness.python_packages['cadquery-ocp']}`, 'ok');
+    await renderModeConfig();
     await renderViewer();
   } catch (error) {
     setStep('model', 'error');
@@ -321,7 +666,10 @@ async function boot() {
   }
 }
 
-$('#run').onclick = runChecks;
+$('#run').onclick = runMode;
 $('#v1').onclick = () => switchModel('V1');
 $('#v2').onclick = () => switchModel('V2');
+document.querySelectorAll('.mode-tab').forEach((button) => {
+  button.onclick = () => switchMode(button.dataset.mode);
+});
 boot();

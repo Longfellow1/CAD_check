@@ -1,0 +1,29 @@
+id: HEADROOM_FRONT
+version: "0.1"
+title: "前排头部空间（流程验证）"
+source: "Real headspace process fixture"
+source_ref: "fixtures/real-headspace/real-headspace-fixture.yaml#provisional_process_binding"
+engineering_domain: static_clearance
+verification_method: ANALYSIS_GEOMETRY
+executor: minimum_clearance
+target: head_envelope
+counterpart: roof_surface
+workflow_id: GEOMETRY_CHECK_V1
+required_bindings:
+  - head_envelope
+  - roof_surface
+rule:
+  authority: PROVISIONAL
+  operator: ">="
+  threshold: 60.0
+  unit: mm
+evidence:
+  highlight_ab: true
+  measurement_line: true
+  measurement_value: true
+  screenshot: true
+ground_truth:
+  status: PENDING_MANUAL_SOURCE
+  value: null
+  unit: mm
+note: "临时阈值和面/壳绑定仅用于流程验证，不能作为正式工程结论。"

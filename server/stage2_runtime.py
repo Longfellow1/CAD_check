@@ -2,18 +2,22 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+import json
 import uuid
 import yaml
 
 from .artifacts import ArtifactStore
 from .cases import CASES
+from .check_registry import CheckCardRegistry
 from .domain import (
     CheckExecution,
     CheckStatus,
     Evidence,
+    RuleAuthority,
     RegressionStatus,
     TraceStep,
     VerificationCase,
+    VerificationMode,
 )
 from .regression import compare_runs
 from .cad.binding import load_binding_file, resolve_binding, validate_bindings
@@ -33,25 +37,58 @@ CRITICAL_READINESS_CHECKS = (
 
 def _evaluate(value: float, case: VerificationCase):
     r = case.rule
+    if r is None or r.authority == RuleAuthority.EXPLORATORY:
+        return CheckStatus.MEASURED, None, None
     if r.operator == ">=":
-        return (CheckStatus.PASS if value >= r.threshold else CheckStatus.FAIL, value - r.threshold)
-    if r.operator == "<=":
-        return (CheckStatus.PASS if value <= r.threshold else CheckStatus.FAIL, r.threshold - value)
-    if r.operator == ">":
-        return (CheckStatus.PASS if value > r.threshold else CheckStatus.FAIL, value - r.threshold)
-    if r.operator == "<":
-        return (CheckStatus.PASS if value < r.threshold else CheckStatus.FAIL, r.threshold - value)
-    if r.operator == "==":
-        return (CheckStatus.PASS if value == r.threshold else CheckStatus.FAIL, -abs(value - r.threshold))
-    if r.operator == "range":
+        raw_status, margin = (
+            (CheckStatus.PASS, value - r.threshold)
+            if value >= r.threshold
+            else (CheckStatus.FAIL, value - r.threshold)
+        )
+    elif r.operator == "<=":
+        raw_status, margin = (
+            (CheckStatus.PASS, r.threshold - value)
+            if value <= r.threshold
+            else (CheckStatus.FAIL, r.threshold - value)
+        )
+    elif r.operator == ">":
+        raw_status, margin = (
+            (CheckStatus.PASS, value - r.threshold)
+            if value > r.threshold
+            else (CheckStatus.FAIL, value - r.threshold)
+        )
+    elif r.operator == "<":
+        raw_status, margin = (
+            (CheckStatus.PASS, r.threshold - value)
+            if value < r.threshold
+            else (CheckStatus.FAIL, r.threshold - value)
+        )
+    elif r.operator == "==":
+        raw_status = CheckStatus.PASS if value == r.threshold else CheckStatus.FAIL
+        margin = -abs(value - r.threshold)
+    elif r.operator == "range":
         ok = r.lower <= value <= r.upper
         margin = (
             min(value - r.lower, r.upper - value)
             if ok
             else -min(abs(value - r.lower), abs(value - r.upper))
         )
-        return (CheckStatus.PASS if ok else CheckStatus.FAIL, margin)
-    return CheckStatus.REVIEW_REQUIRED, None
+        raw_status = CheckStatus.PASS if ok else CheckStatus.FAIL
+    else:
+        return CheckStatus.REVIEW_REQUIRED, None, None
+
+    status = (
+        CheckStatus.REVIEW_REQUIRED
+        if r.authority == RuleAuthority.PROVISIONAL
+        else raw_status
+    )
+    return status, margin, raw_status
+
+
+def _measurement_unit(case: VerificationCase) -> str:
+    if case.rule is not None:
+        return case.rule.unit
+    return "deg" if case.executor == "angle" else "mm"
 
 
 def _blocked(
@@ -59,6 +96,9 @@ def _blocked(
     case: VerificationCase,
     reason: str,
     trace: list[TraceStep],
+    *,
+    mode: VerificationMode = VerificationMode.ENGINEERING_CHECK,
+    check_card_version: str | None = None,
 ) -> CheckExecution:
     return CheckExecution(
         model_id=model.model_id,
@@ -66,8 +106,11 @@ def _blocked(
         case_id=case.id,
         title=case.title,
         executor=case.executor,
+        mode=mode,
+        rule_authority=case.rule.authority if case.rule else None,
+        check_card_version=check_card_version,
         status=CheckStatus.BLOCKED,
-        unit=case.rule.unit,
+        unit=_measurement_unit(case),
         evidence=Evidence(
             focus_ids=[value for value in (case.target, case.counterpart) if value],
             annotation=reason,
@@ -89,6 +132,9 @@ def run_step_case(
     model: StepModel,
     case: VerificationCase,
     binding_data: dict[str, Any],
+    *,
+    mode: VerificationMode = VerificationMode.ENGINEERING_CHECK,
+    check_card_version: str | None = None,
 ) -> CheckExecution:
     trace: list[TraceStep] = []
     try:
@@ -99,7 +145,14 @@ def run_step_case(
             else None
         )
     except Exception as exc:
-        return _blocked(model, case, f"binding failed: {exc}", trace)
+        return _blocked(
+            model,
+            case,
+            f"binding failed: {exc}",
+            trace,
+            mode=mode,
+            check_card_version=check_card_version,
+        )
 
     trace.append(
         TraceStep(
@@ -119,13 +172,13 @@ def run_step_case(
     try:
         if case.executor == "minimum_clearance":
             result = minimum_clearance(
-                target.occurrence.shape,
-                counterpart.occurrence.shape,
+                target.shape,
+                counterpart.shape,
             )
         elif case.executor == "directional_distance":
             result = directional_distance(
-                target.occurrence.shape,
-                counterpart.occurrence.shape,
+                target.shape,
+                counterpart.shape,
                 case.axis,
             )
         elif case.executor == "angle":
@@ -139,11 +192,20 @@ def run_step_case(
                 case,
                 f"unsupported executor: {case.executor}",
                 trace,
+                mode=mode,
+                check_card_version=check_card_version,
             )
     except Exception as exc:
-        return _blocked(model, case, f"geometry failed: {exc}", trace)
+        return _blocked(
+            model,
+            case,
+            f"geometry failed: {exc}",
+            trace,
+            mode=mode,
+            check_card_version=check_card_version,
+        )
 
-    status, margin = _evaluate(result.value, case)
+    status, margin, raw_status = _evaluate(result.value, case)
     trace.append(
         TraceStep(
             stage="geometry",
@@ -152,27 +214,34 @@ def run_step_case(
                 "method": result.method,
                 "approximation": result.approximation,
                 "value": round(result.value, 6),
-                "unit": case.rule.unit,
+                "unit": _measurement_unit(case),
                 "p1": result.p1,
                 "p2": result.p2,
             },
         )
     )
-    trace.append(
-        TraceStep(
-            stage="rule",
-            detail={
-                "operator": case.rule.operator,
-                "threshold": case.rule.threshold,
-                "lower": case.rule.lower,
-                "upper": case.rule.upper,
-                "value": round(result.value, 6),
-                "margin": round(margin, 6) if margin is not None else None,
-                "status": status.value,
-                "source_ref": case.source_ref,
-            },
+    if case.rule is not None:
+        trace.append(
+            TraceStep(
+                stage="rule",
+                detail={
+                    "authority": (
+                        case.rule.authority.value
+                        if case.rule.authority
+                        else None
+                    ),
+                    "operator": case.rule.operator,
+                    "threshold": case.rule.threshold,
+                    "lower": case.rule.lower,
+                    "upper": case.rule.upper,
+                    "value": round(result.value, 6),
+                    "margin": round(margin, 6) if margin is not None else None,
+                    "raw_status": raw_status.value if raw_status else None,
+                    "status": status.value,
+                    "source_ref": case.source_ref,
+                },
+            )
         )
-    )
 
     focus = [case.target] + ([case.counterpart] if case.counterpart else [])
     return CheckExecution(
@@ -181,15 +250,18 @@ def run_step_case(
         case_id=case.id,
         title=case.title,
         executor=case.executor,
+        mode=mode,
+        rule_authority=case.rule.authority if case.rule else None,
+        check_card_version=check_card_version,
         status=status,
         value=round(result.value, 3),
-        unit=case.rule.unit,
+        unit=_measurement_unit(case),
         margin=round(margin, 3) if margin is not None else None,
         evidence=Evidence(
             focus_ids=focus,
             line_start=result.p1,
             line_end=result.p2,
-            annotation=f"{result.value:.2f} {case.rule.unit}",
+            annotation=f"{result.value:.2f} {_measurement_unit(case)}",
         ),
         trace=trace,
     )
@@ -217,6 +289,7 @@ class Stage2Workspace:
         self.manifest: dict[str, Any] = {}
         self.binding_data: dict[str, Any] = {"bindings": {}}
         self.store = ArtifactStore(self.root / ".cadcheck" / "runs")
+        self.registry = CheckCardRegistry(self.root / "checks")
 
     def load_manifest(self, manifest_path: str | Path):
         manifest_path = Path(manifest_path)
@@ -226,6 +299,14 @@ class Stage2Workspace:
         binding_path = self.manifest.get("binding_file")
         if binding_path:
             self.binding_data = load_binding_file(self.root / binding_path)
+        session_binding_path = self.root / ".cadcheck/session-bindings.json"
+        if session_binding_path.exists():
+            session_data = json.loads(session_binding_path.read_text())
+            for semantic_id, entry in session_data.get("bindings", {}).items():
+                self.binding_data.setdefault("bindings", {}).setdefault(
+                    semantic_id,
+                    {},
+                ).update(entry)
 
         self.models.clear()
         for key, spec in self.manifest.get("models", {}).items():
@@ -256,6 +337,149 @@ class Stage2Workspace:
             coordinate_contract=coordinate_contract,
         )
         return self.models[key]
+
+    def get_bindings(self, model_key: str) -> dict[str, Any]:
+        model = self.models[model_key]
+        return {
+            semantic_id: entry.get(model.version) or entry.get("default")
+            for semantic_id, entry in self.binding_data.get("bindings", {}).items()
+            if entry.get(model.version) or entry.get("default")
+        }
+
+    def save_bindings(
+        self,
+        model_key: str,
+        bindings: dict[str, Any],
+    ) -> dict[str, Any]:
+        model = self.models[model_key]
+        all_bindings = self.binding_data.setdefault("bindings", {})
+        for semantic_id, source in bindings.items():
+            all_bindings.setdefault(semantic_id, {})[model.version] = source
+        session_binding_path = self.root / ".cadcheck/session-bindings.json"
+        session_binding_path.parent.mkdir(parents=True, exist_ok=True)
+        session_binding_path.write_text(
+            json.dumps(
+                {"bindings": all_bindings},
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        return self.get_bindings(model_key)
+
+    def _write_single_execution(
+        self,
+        model_key: str,
+        case: VerificationCase,
+        execution: CheckExecution,
+        *,
+        mode: VerificationMode,
+        binding_data: dict[str, Any],
+    ) -> dict[str, Any]:
+        run_id = uuid.uuid4().hex[:12]
+        run_dir = self.store.write_single_run(
+            run_id,
+            execution,
+            mode=mode,
+            model_key=model_key,
+            case=case,
+            bindings=binding_data,
+        )
+        return {
+            "run_id": run_id,
+            "run_dir": str(run_dir),
+            "mode": mode,
+            "model": model_key,
+            "case": case,
+            "execution": execution,
+        }
+
+    def run_explore(
+        self,
+        model_key: str,
+        *,
+        target: str,
+        counterpart: str | None,
+        executor: str,
+        axis: str | None = None,
+        angle_axis: str | None = None,
+        binding_data: dict[str, Any] | None = None,
+        title: str = "探索性几何测量",
+        verification_method: str = "ANALYSIS_GEOMETRY",
+    ) -> dict[str, Any]:
+        model = self.models[model_key]
+        case = VerificationCase(
+            id="EXPLORE_MEASURE",
+            title=title,
+            source="Manual exploration",
+            source_ref="explore://manual",
+            executor=executor,
+            target=target,
+            counterpart=counterpart,
+            axis=axis,
+            angle_axis=angle_axis,
+            engineering_domain="exploratory",
+            verification_method=verification_method,
+            workflow_id="GEOMETRY_MEASURE_V1",
+            required_bindings=[
+                semantic_id
+                for semantic_id in (target, counterpart)
+                if semantic_id
+            ],
+            rule=None,
+        )
+        data = binding_data or self.binding_data
+        execution = run_step_case(
+            model,
+            case,
+            data,
+            mode=VerificationMode.EXPLORE_MEASURE,
+        )
+        return self._write_single_execution(
+            model_key,
+            case,
+            execution,
+            mode=VerificationMode.EXPLORE_MEASURE,
+            binding_data=data,
+        )
+
+    def run_check(
+        self,
+        model_key: str,
+        card_id: str,
+        *,
+        binding_data: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        model = self.models[model_key]
+        card = self.registry.get(card_id)
+        case = card.to_case()
+        data = binding_data or self.binding_data
+        execution = run_step_case(
+            model,
+            case,
+            data,
+            mode=VerificationMode.ENGINEERING_CHECK,
+            check_card_version=card.version,
+        )
+        return self._write_single_execution(
+            model_key,
+            case,
+            execution,
+            mode=VerificationMode.ENGINEERING_CHECK,
+            binding_data=data,
+        )
+
+    def check_cards(self):
+        return self.registry.list()
+
+    def case_definition(self, case_id: str) -> VerificationCase:
+        try:
+            return self.registry.case(case_id)
+        except KeyError:
+            for case in CASES:
+                if case.id == case_id:
+                    return case
+        raise KeyError(f"unknown case: {case_id}")
 
     def readiness(
         self,
@@ -375,10 +599,15 @@ class Stage2Workspace:
             baseline,
             candidate,
             regression,
+            mode=VerificationMode.REGRESSION_COMPARE,
+            models={"baseline": baseline_key, "candidate": candidate_key},
+            cases=cases,
+            bindings=self.binding_data,
         )
         return {
             "run_id": run_id,
             "run_dir": str(run_dir),
+            "mode": VerificationMode.REGRESSION_COMPARE,
             "baseline": baseline,
             "candidate": candidate,
             "regression": regression,
@@ -398,7 +627,7 @@ class Stage2Workspace:
                     self.binding_data,
                     semantic_id,
                 )
-                named[semantic_id] = binding.occurrence.shape
+                named[semantic_id] = binding.shape
         else:
             named = {
                 occurrence.path: occurrence.shape

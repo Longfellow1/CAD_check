@@ -4,6 +4,7 @@ import base64
 import importlib.metadata
 import json
 from pathlib import Path
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
@@ -12,7 +13,8 @@ from pydantic import BaseModel
 
 from .cases import CASES
 from .stage2_runtime import Stage2Workspace
-from .cad.binding import resolve_binding
+from .cad.binding import resolve_binding, validate_bindings
+from .cad.step_reader import subshape_inventory
 from .cad.tessellation import tessellate_shapes
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -33,6 +35,31 @@ class RegisterModel(BaseModel):
 
 class RunRequest(BaseModel):
     baseline: str = "V1"; candidate: str = "V2"
+
+    case_ids: list[str] | None = None
+
+
+class ExploreRequest(BaseModel):
+    model: str
+    target: str
+    counterpart: str | None = None
+    executor: Literal["minimum_clearance", "directional_distance", "angle"]
+    axis: Literal["X", "Y", "Z"] | None = None
+    angle_axis: Literal["X", "Y", "Z"] | None = None
+    bindings: dict[str, Any] | None = None
+    title: str = "探索性几何测量"
+    verification_method: str = "ANALYSIS_GEOMETRY"
+
+
+class CheckRequest(BaseModel):
+    model: str
+    card_id: str
+    bindings: dict[str, Any] | None = None
+
+
+class BindingRequest(BaseModel):
+    model: str
+    bindings: dict[str, Any]
 
 class Screenshot(BaseModel):
     data_url: str
@@ -55,6 +82,11 @@ def system_readiness():
 def models():
     return {k: {"model_id":m.model_id,"version":m.version,"step":str(m.path),"schema":m.schema,"source_unit":m.source_unit,"leaf_count":len(m.leaf_occurrences)} for k,m in workspace.models.items()}
 
+
+@app.get("/api/check-cards")
+def check_cards():
+    return [card.model_dump(mode="json") for card in workspace.check_cards()]
+
 @app.post("/api/models/register")
 def register(req: RegisterModel):
     p = Path(req.step); p = p if p.is_absolute() else ROOT / p
@@ -72,7 +104,50 @@ def readiness(key: str):
 def inventory(key: str):
     if key not in workspace.models: raise HTTPException(404, "model not found")
     m=workspace.models[key]
-    return {"model_id":m.model_id,"version":m.version,"occurrences":[{"path":o.path,"name":o.name,"bbox":o.bbox,"valid":o.is_valid,"children":len(o.children)} for o in m.occurrences.values()]}
+    return {
+        "model_id":m.model_id,
+        "version":m.version,
+        "occurrences":[
+            {
+                "path":o.path,
+                "name":o.name,
+                "bbox":o.bbox,
+                "valid":o.is_valid,
+                "children":len(o.children),
+                "subshapes":subshape_inventory(o.shape),
+            }
+            for o in m.occurrences.values()
+        ],
+    }
+
+
+@app.get("/api/bindings")
+def bindings(model: str):
+    if model not in workspace.models: raise HTTPException(404, "model not found")
+    return {
+        "model": model,
+        "version": workspace.models[model].version,
+        "bindings": workspace.get_bindings(model),
+    }
+
+
+@app.post("/api/bindings")
+def save_bindings(req: BindingRequest):
+    if req.model not in workspace.models: raise HTTPException(404, "model not found")
+    try:
+        saved = workspace.save_bindings(req.model, req.bindings)
+        validation = validate_bindings(
+            workspace.models[req.model],
+            workspace.binding_data,
+            list(req.bindings),
+        )
+        return {
+            "model": req.model,
+            "bindings": saved,
+            "validation": validation,
+        }
+    except Exception as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 @app.get("/api/models/{key}/viewer")
 def viewer(key: str):
@@ -81,9 +156,57 @@ def viewer(key: str):
 
 @app.post("/api/runs/regression")
 def run(req: RunRequest):
-    try: result=workspace.run_regression(req.baseline, req.candidate)
+    try:
+        cases = workspace.registry.cases(req.case_ids) if req.case_ids else CASES
+        result=workspace.run_regression(req.baseline, req.candidate, cases)
     except Exception as exc: raise HTTPException(400, str(exc)) from exc
-    return {"run_id":result["run_id"],"run_dir":result["run_dir"],"cases":[c.model_dump(mode="json") for c in CASES],"baseline":[x.model_dump(mode="json") for x in result["baseline"]],"candidate":[x.model_dump(mode="json") for x in result["candidate"]],"regression":[x.model_dump(mode="json") for x in result["regression"]]}
+    return {"run_id":result["run_id"],"run_dir":result["run_dir"],"mode":result.get("mode"),"cases":[c.model_dump(mode="json") for c in cases],"baseline":[x.model_dump(mode="json") for x in result["baseline"]],"candidate":[x.model_dump(mode="json") for x in result["candidate"]],"regression":[x.model_dump(mode="json") for x in result["regression"]]}
+
+
+@app.post("/api/runs/explore")
+def explore(req: ExploreRequest):
+    try:
+        result = workspace.run_explore(
+            req.model,
+            target=req.target,
+            counterpart=req.counterpart,
+            executor=req.executor,
+            axis=req.axis,
+            angle_axis=req.angle_axis,
+            binding_data=req.bindings,
+            title=req.title,
+            verification_method=req.verification_method,
+        )
+    except Exception as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {
+        "run_id": result["run_id"],
+        "run_dir": result["run_dir"],
+        "mode": result["mode"],
+        "model": result["model"],
+        "case": result["case"].model_dump(mode="json"),
+        "execution": result["execution"].model_dump(mode="json"),
+    }
+
+
+@app.post("/api/runs/check")
+def check(req: CheckRequest):
+    try:
+        result = workspace.run_check(
+            req.model,
+            req.card_id,
+            binding_data=req.bindings,
+        )
+    except Exception as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {
+        "run_id": result["run_id"],
+        "run_dir": result["run_dir"],
+        "mode": result["mode"],
+        "model": result["model"],
+        "case": result["case"].model_dump(mode="json"),
+        "execution": result["execution"].model_dump(mode="json"),
+    }
 
 @app.get("/api/runs/{run_id}")
 def get_run(run_id: str):
@@ -101,11 +224,24 @@ def get_trace(run_id: str):
 def evidence_viewer(run_id: str, case_id: str, model: str="V2"):
     p=workspace.store.root/run_id/"result.json"
     if not p.exists() or model not in workspace.models: raise HTTPException(404,"run/model not found")
-    case=next((c for c in CASES if c.id==case_id),None)
-    if not case: raise HTTPException(404,"case not found")
+    data=json.loads(p.read_text())
+    case_data = data.get("case")
+    if case_data and case_data.get("id") == case_id:
+        from .domain import VerificationCase
+        case = VerificationCase.model_validate(case_data)
+    else:
+        try:
+            case = workspace.case_definition(case_id)
+        except KeyError as exc:
+            raise HTTPException(404,"case not found") from exc
+    binding_data = data.get("bindings") or workspace.binding_data
     m=workspace.models[model]; named={}
-    for sid in [case.target]+([case.counterpart] if case.counterpart else []): named[sid]=resolve_binding(m,workspace.binding_data,sid).occurrence.shape
-    side="candidate" if model=="V2" else "baseline"; data=json.loads(p.read_text()); exe=next((x for x in data[side] if x["case_id"]==case_id),None)
+    for sid in [case.target]+([case.counterpart] if case.counterpart else []):
+        named[sid]=resolve_binding(m,binding_data,sid).shape
+    side="candidate" if model=="V2" else "baseline"
+    exe=next((x for x in data.get(side, []) if x["case_id"]==case_id),None)
+    if exe is None and data.get("execution", {}).get("case_id") == case_id:
+        exe = data["execution"]
     if exe and exe["evidence"].get("line_start") and exe["evidence"].get("line_end"):
         from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeEdge
         from OCP.gp import gp_Pnt

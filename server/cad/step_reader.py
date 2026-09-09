@@ -65,6 +65,46 @@ def _shape_valid(shape: Any) -> bool:
     return bool(BRepCheck_Analyzer(shape).IsValid())
 
 
+def subshape_inventory(shape: Any, *, limit: int = 128) -> dict[str, list[dict[str, Any]]]:
+    """Expose bounded, manually selectable sub-shape references for a viewer.
+
+    The selector is deliberately an explicit 1-based occurrence index.  It is
+    useful for an engineer to create a binding in the MVP, but it is not
+    presented as a stable cross-version identity.
+    """
+    from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_SHELL, TopAbs_VERTEX
+    from OCP.TopExp import TopExp_Explorer
+
+    kinds = {
+        "shell": TopAbs_SHELL,
+        "face": TopAbs_FACE,
+        "edge": TopAbs_EDGE,
+        "vertex": TopAbs_VERTEX,
+    }
+    result: dict[str, list[dict[str, Any]]] = {}
+    for name, shape_kind in kinds.items():
+        explorer = TopExp_Explorer(shape, shape_kind)
+        items: list[dict[str, Any]] = []
+        index = 1
+        while explorer.More() and len(items) < limit:
+            current = explorer.Current()
+            try:
+                bbox = _shape_bbox(current)
+            except Exception:
+                bbox = None
+            items.append(
+                {
+                    "selector": {"kind": name, "index": index},
+                    "bbox": bbox,
+                    "valid": _shape_valid(current),
+                }
+            )
+            index += 1
+            explorer.Next()
+        result[name] = items
+    return result
+
+
 def _loc_matrix(location: Any) -> tuple[float, ...]:
     if location is None or location.IsIdentity():
         return (1.0, 0.0, 0.0, 0.0,

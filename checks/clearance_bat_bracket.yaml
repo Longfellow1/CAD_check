@@ -1,0 +1,26 @@
+id: CLR_BAT_BRACKET
+version: "0.1"
+title: "动力电池包至底部支架间隙"
+source: "Controlled Automotive Fixture"
+source_ref: "fixtures/controlled/controlled-fixture-spec.yaml#CF-CLR-001"
+engineering_domain: static_clearance
+verification_method: ANALYSIS_GEOMETRY
+executor: minimum_clearance
+target: battery
+counterpart: underbody_bracket
+workflow_id: GEOMETRY_CHECK_V1
+required_bindings:
+  - battery
+  - underbody_bracket
+rule:
+  authority: FORMAL
+  operator: ">="
+  threshold: 10.0
+  unit: mm
+regression_epsilon: 0.1
+evidence:
+  highlight_ab: true
+  measurement_line: true
+  measurement_value: true
+  screenshot: true
+note: "受控软件验证 Fixture 的正式判定卡，不代表 OEM 工程规则。"

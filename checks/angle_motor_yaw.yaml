@@ -1,0 +1,25 @@
+id: ANG_MOTOR_YAW
+version: "0.1"
+title: "动力总成 Z 轴布置角偏差"
+source: "Controlled Automotive Fixture"
+source_ref: "fixtures/controlled/controlled-fixture-spec.yaml#CF-ANG-001"
+engineering_domain: static_clearance
+verification_method: ANALYSIS_GEOMETRY
+executor: angle
+target: motor
+angle_axis: Z
+workflow_id: GEOMETRY_CHECK_V1
+required_bindings:
+  - motor
+rule:
+  authority: FORMAL
+  operator: "<="
+  threshold: 2.0
+  unit: deg
+regression_epsilon: 0.1
+evidence:
+  highlight_ab: true
+  measurement_line: false
+  measurement_value: true
+  screenshot: true
+note: "角度 Executor 当前基于模型变换矩阵。"

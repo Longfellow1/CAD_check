@@ -1,0 +1,27 @@
+id: DIR_BAT_GROUND
+version: "0.1"
+title: "动力电池包 Z 向最小离地间隙"
+source: "Controlled Automotive Fixture"
+source_ref: "fixtures/controlled/controlled-fixture-spec.yaml#CF-DIR-001"
+engineering_domain: static_clearance
+verification_method: ANALYSIS_GEOMETRY
+executor: directional_distance
+target: battery
+counterpart: ground_ref
+axis: Z
+workflow_id: GEOMETRY_CHECK_V1
+required_bindings:
+  - battery
+  - ground_ref
+rule:
+  authority: FORMAL
+  operator: ">="
+  threshold: 130.0
+  unit: mm
+regression_epsilon: 0.1
+evidence:
+  highlight_ab: true
+  measurement_line: true
+  measurement_value: true
+  screenshot: true
+note: "方向距离当前使用受控 Fixture 的 B-Rep 包围盒极值近似。"

@@ -4,7 +4,13 @@ from .domain import CheckExecution, CheckStatus, RegressionResult, RegressionSta
 
 
 def compare_case(b: CheckExecution, c: CheckExecution, case: VerificationCase) -> RegressionResult:
-    if b.status==CheckStatus.BLOCKED or c.status==CheckStatus.BLOCKED or b.value is None or c.value is None:
+    comparable_statuses = {CheckStatus.PASS, CheckStatus.FAIL}
+    if (
+        b.status not in comparable_statuses
+        or c.status not in comparable_statuses
+        or b.value is None
+        or c.value is None
+    ):
         reg=RegressionStatus.NON_COMPARABLE; delta=None
     elif b.status==CheckStatus.PASS and c.status==CheckStatus.FAIL:
         reg=RegressionStatus.NEW_FAIL; delta=c.value-b.value

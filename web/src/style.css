@@ -36,17 +36,45 @@ header .status { margin-left: auto; max-width: 560px; }
 .status.error { color: #b91c1c; }
 
 .toolbar {
-  height: 52px;
+  min-height: 52px;
   background: #fff;
   padding: 8px 16px;
   border-bottom: 1px solid #e2e7ee;
   display: flex;
   gap: 8px;
   align-items: center;
+  flex-wrap: wrap;
 }
 .primary { background: #172554; color: #fff; border-color: #172554; }
 .model-button.selected { background: #e0e7ff; border-color: #6366f1; }
 .run-id { margin-left: auto; color: #64748b; font-size: 12px; }
+.mode-tabs { display: flex; gap: 4px; }
+.mode-tab { border-radius: 6px; padding: 7px 9px; font-size: 12px; }
+.mode-tab.selected { background: #eef2ff; border-color: #818cf8; color: #3730a3; }
+
+.mode-config {
+  min-height: 58px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e7ee;
+  padding: 8px 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.mode-title { display: flex; flex-direction: column; gap: 2px; min-width: 240px; }
+.mode-title b { font-size: 13px; }
+.mode-title span, .mode-note { color: #64748b; font-size: 11px; }
+.mode-config label { display: flex; align-items: center; gap: 5px; color: #475569; font-size: 12px; }
+.mode-config select { max-width: 320px; border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 8px; background: #fff; color: #172033; }
+.card-preview { display: flex; flex-direction: column; gap: 2px; min-width: 300px; color: #475569; font-size: 11px; }
+.card-preview b { color: #172033; font-size: 12px; }
+.card-preview small { color: #94a3b8; max-width: 520px; overflow-wrap: anywhere; }
+.binding-editor { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.binding-title { color: #475569; font-size: 11px; font-weight: 600; }
+.binding-editor label { font-size: 11px; }
+.binding-editor select { max-width: 260px; }
+.binding-editor button { padding: 6px 9px; font-size: 11px; }
 
 .guide {
   display: grid;
@@ -102,8 +130,8 @@ main {
   grid-template-columns: 270px minmax(680px, 1fr) 320px;
   gap: 10px;
   padding: 0 10px 10px;
-  height: calc(100vh - 220px);
-  min-height: 620px;
+  height: calc(100vh - 290px);
+  min-height: 560px;
 }
 .panel, .viewer {
   background: #fff;
@@ -127,12 +155,13 @@ main {
 .case.selected { background: #eef2ff; border-color: #818cf8; }
 .case span { flex: 1; font-size: 12px; }
 .case b { font-size: 11px; white-space: nowrap; }
-.tag-NEW_FAIL, .tag-FAIL { color: #b91c1c; }
+.tag-NEW_FAIL, .tag-FAIL, .tag-REVIEW_REQUIRED, .tag-BLOCKED { color: #b91c1c; }
 .tag-FIXED, .tag-PASS { color: #15803d; }
 .tag-REGRESSED { color: #c2410c; }
 .tag-UNCHANGED { color: #64748b; }
+.tag-MEASURED { color: #2563eb; }
 
-.viewer { overflow: hidden; }
+.viewer { overflow: hidden; position: relative; }
 .vh {
   height: 42px;
   border-bottom: 1px solid #e2e7ee;
@@ -144,6 +173,27 @@ main {
 #measure { color: #dc2626; }
 #cad { height: calc(100% - 42px); min-height: 560px; }
 .viewer-empty { display: grid; place-items: center; height: 100%; color: #94a3b8; }
+.evidence-overlay {
+  position: absolute;
+  top: 54px;
+  left: 14px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-width: 300px;
+  padding: 9px 11px;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, .92);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, .12);
+  color: #475569;
+  font-size: 11px;
+  pointer-events: none;
+}
+.evidence-overlay b { color: #172033; font-size: 12px; }
+.evidence-overlay strong { color: #1d4ed8; font-size: 15px; }
+.evidence-overlay em { color: #166534; font-style: normal; font-weight: 700; }
 
 .detail { padding-bottom: 12px; }
 .detail #detail { padding: 0 12px; }
@@ -151,6 +201,8 @@ main {
 .result { border-radius: 6px; padding: 8px; background: #f1f5f9; }
 .result.NEW_FAIL, .result.FAIL { background: #fef2f2; color: #b91c1c; }
 .result.FIXED, .result.PASS { background: #f0fdf4; color: #166534; }
+.result.MEASURED { background: #eff6ff; color: #1d4ed8; }
+.result.REVIEW_REQUIRED, .result.BLOCKED { background: #fff7ed; color: #c2410c; }
 .facts { display: grid; grid-template-columns: 70px 1fr; gap: 7px; font-size: 12px; }
 .facts dt { color: #64748b; }
 .facts dd { margin: 0; overflow-wrap: anywhere; }

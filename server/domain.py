@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 
 class CheckStatus(str, Enum):
+    MEASURED = "MEASURED"
     PASS = "PASS"
     FAIL = "FAIL"
     REVIEW_REQUIRED = "REVIEW_REQUIRED"
@@ -19,6 +20,18 @@ class RegressionStatus(str, Enum):
     REGRESSED = "REGRESSED"
     UNCHANGED = "UNCHANGED"
     NON_COMPARABLE = "NON_COMPARABLE"
+
+
+class VerificationMode(str, Enum):
+    EXPLORE_MEASURE = "EXPLORE_MEASURE"
+    ENGINEERING_CHECK = "ENGINEERING_CHECK"
+    REGRESSION_COMPARE = "REGRESSION_COMPARE"
+
+
+class RuleAuthority(str, Enum):
+    FORMAL = "FORMAL"
+    PROVISIONAL = "PROVISIONAL"
+    EXPLORATORY = "EXPLORATORY"
 
 
 class Box(BaseModel):
@@ -43,6 +56,7 @@ class Rule(BaseModel):
     lower: float | None = None
     upper: float | None = None
     unit: str = "mm"
+    authority: RuleAuthority | None = None
 
 
 class VerificationCase(BaseModel):
@@ -55,9 +69,55 @@ class VerificationCase(BaseModel):
     counterpart: str | None = None
     axis: Literal["X", "Y", "Z"] | None = None
     angle_axis: Literal["X", "Y", "Z"] | None = None
-    rule: Rule
+    engineering_domain: str = "unknown"
+    verification_method: str = "ANALYSIS_GEOMETRY"
+    workflow_id: str = "GEOMETRY_CHECK_V1"
+    required_bindings: list[str] = Field(default_factory=list)
+    rule: Rule | None = None
     regression_epsilon: float = 0.5
     note: str = ""
+
+
+class CheckCard(BaseModel):
+    id: str
+    version: str
+    title: str
+    source: str
+    source_ref: str
+    engineering_domain: str
+    verification_method: str
+    executor: Literal["minimum_clearance", "directional_distance", "angle"]
+    target: str
+    counterpart: str | None = None
+    axis: Literal["X", "Y", "Z"] | None = None
+    angle_axis: Literal["X", "Y", "Z"] | None = None
+    workflow_id: str = "GEOMETRY_CHECK_V1"
+    required_bindings: list[str] = Field(default_factory=list)
+    rule: Rule
+    regression_epsilon: float = 0.5
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    note: str = ""
+    ground_truth: dict[str, Any] | None = None
+
+    def to_case(self) -> VerificationCase:
+        return VerificationCase(
+            id=self.id,
+            title=self.title,
+            source=self.source,
+            source_ref=self.source_ref,
+            executor=self.executor,
+            target=self.target,
+            counterpart=self.counterpart,
+            axis=self.axis,
+            angle_axis=self.angle_axis,
+            engineering_domain=self.engineering_domain,
+            verification_method=self.verification_method,
+            workflow_id=self.workflow_id,
+            required_bindings=self.required_bindings,
+            rule=self.rule,
+            regression_epsilon=self.regression_epsilon,
+            note=self.note,
+        )
 
 
 class Evidence(BaseModel):
@@ -79,6 +139,9 @@ class CheckExecution(BaseModel):
     case_id: str
     title: str
     executor: str
+    mode: VerificationMode = VerificationMode.ENGINEERING_CHECK
+    rule_authority: RuleAuthority | None = None
+    check_card_version: str | None = None
     status: CheckStatus
     value: float | None = None
     unit: str = "mm"
