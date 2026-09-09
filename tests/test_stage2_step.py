@@ -117,6 +117,12 @@ def test_viewer_http_endpoint_returns_serialized_shapes(
     assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["shapes"]["parts"]
+    for leaf in payload["shapes"]["parts"]:
+        assert leaf["shape"].get("vertices"), leaf
+        assert leaf["shape"].get("triangles"), leaf
+        assert "ref" not in leaf["shape"], leaf
+        assert "/" not in leaf["name"], leaf
+        assert leaf["id"].startswith(payload["shapes"]["id"] + "/"), leaf
 
 
 def test_evidence_viewer_http_endpoint_includes_measurement_shape(
@@ -139,7 +145,11 @@ def test_evidence_viewer_http_endpoint_includes_measurement_shape(
     )
     assert response.status_code == 200, response.text
     parts = response.json()["shapes"]["parts"]
-    assert any(part["name"] == "__measurement__" for part in parts)
+    measurement = next(
+        part for part in parts if part["name"] == "__measurement__"
+    )
+    assert measurement["shape"].get("edges"), measurement
+    assert "ref" not in measurement["shape"], measurement
 
 
 def test_cli_contract_returns_zero_only_for_real_golden():

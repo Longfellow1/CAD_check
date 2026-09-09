@@ -1,0 +1,47 @@
+schema: cad-check-real-headspace-fixture/v0.1
+fixture_id: real_headspace
+purpose: import_viewer_geometry_evidence_process
+source_files:
+  catpart:
+    path: 1.1.CATPart
+    sha256: 198356c4f683415ee25d75b90d42d6744d59420c012bb55944273cc41d9a2507
+    format: CATIA_V5_CATPart
+  step:
+    path: 9.9.stp
+    sha256: 1ceb92dc141e8a67e69302096b827a92cbd6e732e58c0ce8d0c68d76ca950e6b
+    format: STEP
+    schema: CONFIG_CONTROL_DESIGN
+    unit: mm
+    coordinate_contract: X-forward/Y-left/Z-up
+    root_path: /Part134
+    occurrence_count: 1
+    open_shell_count: 14
+    closed_shell_count: 0
+    solid_count: 0
+    face_count: 17
+    edge_count: 73
+    vertex_count: 146
+    viewer_mesh_vertices: 904
+    viewer_mesh_triangles: 1309
+    valid_brep: true
+
+provisional_process_binding:
+  status: process_only
+  warning: shell_index_is_not_a_stable_id
+  head_envelope:
+    shell_index: 14
+    bbox_mm: [1289.658, -573.043, 1070.908, 1715.507, -249.961, 1230.439]
+  roof_surface:
+    shell_index: 2
+    bbox_mm: [-285.676, -845.720, 596.471, 1858.482, 0.0, 1340.644]
+  executor: minimum_clearance
+  measured_mm: 64.474
+  temporary_threshold_mm: 60.0
+  expected_status: PASS
+  source_ref: 9.9.stp#synthetic-shell-split
+
+required_for_product_case:
+  - stable semantic object IDs for head envelope and roof/boundary
+  - formal engineering threshold and rule source
+  - CATPart reader or same-settings neutral-format reference export
+  - single-model Web UI case entry

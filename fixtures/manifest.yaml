@@ -166,6 +166,42 @@ datasets:
       v2_expected_status: FAIL
       v1_to_v2_expected_regression: NEW_FAIL
 
+  - id: real_headspace_pair
+    title: "真实头部空间 CATPart / STEP 对照"
+    status: local_real_case_ready_with_binding_gap
+    role: real_step_import_viewer_geometry_evidence_process
+    local_root: fixtures/real-headspace
+    support: fixtures/real-headspace/real-headspace-fixture.yaml
+    source_files:
+      - path: 1.1.CATPart
+        format: CATIA_V5_CATPart
+        sha256: 198356c4f683415ee25d75b90d42d6744d59420c012bb55944273cc41d9a2507
+      - path: 9.9.stp
+        format: STEP
+        schema: CONFIG_CONTROL_DESIGN
+        sha256: 1ceb92dc141e8a67e69302096b827a92cbd6e732e58c0ce8d0c68d76ca950e6b
+    measured_step_inventory:
+      root_path: /Part134
+      occurrence_count: 1
+      open_shell_count: 14
+      closed_shell_count: 0
+      solid_count: 0
+      face_count: 17
+      edge_count: 73
+      vertex_count: 146
+    provisional_case:
+      case_id: HS-CLR-001
+      executor: minimum_clearance
+      target: head_envelope_shell_14
+      counterpart: roof_surface_shell_2
+      measured_mm: 64.474
+      temporary_threshold_mm: 60.0
+      expected_status: PASS
+    blockers:
+      - "CATPart 无本机读取器，不能计算严格损失率"
+      - "STEP 没有可用的语义对象树，壳序号不是稳定绑定"
+      - "当前 Web UI 没有单模型头部空间案例入口"
+
 acceptance:
   all_ready_datasets_must_have:
     - source_or_license_record
