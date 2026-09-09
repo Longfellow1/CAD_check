@@ -102,7 +102,44 @@ def test_ocp_tessellate_bridge_is_json_serializable(
         ["battery", "underbody_bracket"],
     )
     assert "shapes" in payload
-    json.dumps(payload["shapes"])
+    encoded = json.dumps(payload)
+    assert '"parts"' in encoded
+
+
+def test_viewer_http_endpoint_returns_serialized_shapes(
+    workspace: Stage2Workspace,
+):
+    from fastapi.testclient import TestClient
+
+    from server.app import app
+
+    response = TestClient(app).get("/api/models/V1/viewer")
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["shapes"]["parts"]
+
+
+def test_evidence_viewer_http_endpoint_includes_measurement_shape(
+    workspace: Stage2Workspace,
+):
+    from fastapi.testclient import TestClient
+
+    from server.app import app
+
+    client = TestClient(app)
+    run_response = client.post(
+        "/api/runs/regression",
+        json={"baseline": "V1", "candidate": "V2"},
+    )
+    assert run_response.status_code == 200, run_response.text
+    run_id = run_response.json()["run_id"]
+
+    response = client.get(
+        f"/api/runs/{run_id}/evidence/{GOLDEN_CASE}/viewer?model=V2"
+    )
+    assert response.status_code == 200, response.text
+    parts = response.json()["shapes"]["parts"]
+    assert any(part["name"] == "__measurement__" for part in parts)
 
 
 def test_cli_contract_returns_zero_only_for_real_golden():
