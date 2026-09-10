@@ -21,13 +21,7 @@ def _json_safe(value: Any) -> Any:
 
 
 def _expand_shape_refs(node: dict[str, Any], meshes: list[dict[str, Any]]) -> None:
-    """Replace ocp-tessellate's local mesh references with geometry payloads.
-
-    ``tessellate_group`` returns a shape tree whose leaves contain
-    ``{"ref": N}`` and keeps the corresponding mesh dictionaries in a
-    separate list.  That reference form is an internal Python result, not a
-    complete JSON payload for the browser viewer.
-    """
+    """Replace ocp-tessellate's local mesh references with geometry payloads."""
     for part in node.get("parts", []):
         shape = part.get("shape")
         if isinstance(shape, dict) and set(shape) == {"ref"}:
@@ -40,7 +34,7 @@ def _expand_shape_refs(node: dict[str, Any], meshes: list[dict[str, Any]]) -> No
 
 
 def _normalize_viewer_tree(node: dict[str, Any]) -> None:
-    """Make part names and IDs safe for the viewer's slash-delimited tree."""
+    """Keep legacy IDs deterministic while the canonical tree owns identity."""
     parent_id = str(node.get("id") or f"/{node.get('name', 'Group')}")
     used_names: set[str] = set()
     for part in node.get("parts", []) or []:
@@ -58,16 +52,80 @@ def _normalize_viewer_tree(node: dict[str, Any]) -> None:
             _normalize_viewer_tree(part)
 
 
-def tessellate_shapes(named_shapes: dict[str, Any]) -> dict[str, Any]:
-    """Convert OCP TopoDS shapes into three-cad-viewer compatible Shapes.
+def _leaf_parts(node: dict[str, Any]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for part in node.get("parts", []) or []:
+        if isinstance(part, dict) and part.get("parts"):
+            result.extend(_leaf_parts(part))
+        elif isinstance(part, dict):
+            result.append(part)
+    return result
 
-    Keep this adapter isolated so domain evidence never depends on the viewer's
-    payload schema.
-    """
+
+def _tessellate(named_shapes: dict[str, Any], *, kwargs: dict[str, Any] | None = None) -> dict[str, Any]:
     from ocp_tessellate.convert import to_ocpgroup, tessellate_group
 
     group, instances = to_ocpgroup(named_shapes)
-    meshes, shapes, _mapping = tessellate_group(group, instances)
+    meshes, shapes, _mapping = tessellate_group(group, instances, kwargs=kwargs or {})
     _expand_shape_refs(shapes, meshes)
     _normalize_viewer_tree(shapes)
-    return _json_safe({"shapes": shapes})
+    return shapes
+
+
+def tessellate_shapes(named_shapes: dict[str, Any]) -> dict[str, Any]:
+    """Legacy-compatible geometry payload used by controlled fixtures."""
+    return _json_safe({"shapes": _tessellate(named_shapes)})
+
+
+def tessellate_occurrence_paths(
+    model: Any,
+    paths: list[str],
+    *,
+    deviation: float = 0.25,
+    angular_tolerance: float = 0.3,
+    render_edges: bool = False,
+) -> dict[str, Any]:
+    """Tessellate selected XCAF occurrences for the replaceable Electron viewer.
+
+    The output adds canonical occurrence identity to each geometry leaf.  It is
+    intentionally small/on-demand; whole-vehicle hierarchy comes from the
+    Canonical AssemblyTree rather than this payload.
+    """
+    from .assembly_tree import occurrence_index
+
+    unique_paths = list(dict.fromkeys(paths))
+    missing = [path for path in unique_paths if path not in model.occurrences]
+    if missing:
+        raise KeyError(f"unknown occurrence path(s): {missing[:5]}")
+
+    named = {path: model.occurrences[path].shape for path in unique_paths}
+    shapes = _tessellate(
+        named,
+        kwargs={
+            "deviation": deviation,
+            "angular_tolerance": angular_tolerance,
+            "render_edges": render_edges,
+            "render_normals": False,
+        },
+    )
+    leaves = _leaf_parts(shapes)
+    if len(leaves) != len(unique_paths):
+        raise ValueError(
+            f"occurrence tessellation mismatch: geometry={len(leaves)} paths={len(unique_paths)}"
+        )
+
+    identities = occurrence_index(model)
+    for leaf, source_path in zip(leaves, unique_paths, strict=True):
+        identity = identities[source_path]
+        leaf["source_path"] = source_path
+        leaf["occurrence_id"] = identity["occurrence_id"]
+        leaf["prototype_ref"] = source_path
+
+    return _json_safe(
+        {
+            "schema": "cadcheck-viewer-v2",
+            "shapes": shapes,
+            "paths": unique_paths,
+            "occurrence_ids": [identities[path]["occurrence_id"] for path in unique_paths],
+        }
+    )
