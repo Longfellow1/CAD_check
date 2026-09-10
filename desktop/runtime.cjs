@@ -1,5 +1,6 @@
 const { EventEmitter } = require('node:events');
 const { spawn, execFile } = require('node:child_process');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const http = require('node:http');
 const net = require('node:net');
@@ -17,7 +18,7 @@ function findPython(root, platform = process.platform) {
   for (const candidate of candidatePythonPaths(root, platform)) {
     if (fs.existsSync(candidate)) return candidate;
   }
-  throw new Error('未找到 CAD Check Python 环境。请先运行 scripts/bootstrap.sh，或设置 CAD_CHECK_PYTHON。');
+  throw new Error('未找到 CAD Check Python 环境。请先运行 Electron bootstrap，或设置 CAD_CHECK_PYTHON。');
 }
 
 function reservePort(host = '127.0.0.1') {
@@ -33,9 +34,10 @@ function reservePort(host = '127.0.0.1') {
   });
 }
 
-function healthOnce(url, timeoutMs = 1000) {
+function healthOnce(url, token = null, timeoutMs = 1000) {
   return new Promise((resolve, reject) => {
-    const request = http.get(url, { timeout: timeoutMs }, (response) => {
+    const headers = token ? { 'X-CAD-Check-Session': token } : {};
+    const request = http.get(url, { timeout: timeoutMs, headers }, (response) => {
       response.resume();
       if (response.statusCode === 200) resolve(true);
       else reject(new Error(`health returned ${response.statusCode}`));
@@ -45,12 +47,12 @@ function healthOnce(url, timeoutMs = 1000) {
   });
 }
 
-async function waitForHealth(url, { timeoutMs = 30000, intervalMs = 250 } = {}) {
+async function waitForHealth(url, { timeoutMs = 30000, intervalMs = 250, token = null } = {}) {
   const deadline = Date.now() + timeoutMs;
   let lastError = null;
   while (Date.now() < deadline) {
     try {
-      await healthOnce(url);
+      await healthOnce(url, token);
       return;
     } catch (error) {
       lastError = error;
@@ -86,6 +88,7 @@ class RuntimeManager extends EventEmitter {
     this.root = root;
     this.child = null;
     this.port = null;
+    this.sessionToken = null;
     this.state = 'STOPPED';
     this.lastError = null;
   }
@@ -96,8 +99,13 @@ class RuntimeManager extends EventEmitter {
       port: this.port,
       pid: this.child?.pid || null,
       url: this.port ? `http://127.0.0.1:${this.port}` : null,
+      productForm: 'electron',
       error: this.lastError?.message || null,
     };
+  }
+
+  getSessionToken() {
+    return this.sessionToken;
   }
 
   async start() {
@@ -111,6 +119,7 @@ class RuntimeManager extends EventEmitter {
     try {
       const python = findPython(this.root);
       this.port = await reservePort();
+      this.sessionToken = crypto.randomBytes(24).toString('hex');
       const args = [
         '-m', 'uvicorn', 'server.app_v2:app',
         '--host', '127.0.0.1',
@@ -122,6 +131,8 @@ class RuntimeManager extends EventEmitter {
           ...process.env,
           PORT: String(this.port),
           CAD_CHECK_DESKTOP: '1',
+          CAD_CHECK_PRODUCT_FORM: 'electron',
+          CAD_CHECK_SESSION_TOKEN: this.sessionToken,
           PYTHONUNBUFFERED: '1',
         },
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -142,7 +153,9 @@ class RuntimeManager extends EventEmitter {
         this.emit('state', this.status());
       });
 
-      await waitForHealth(`http://127.0.0.1:${this.port}/api/health`);
+      await waitForHealth(`http://127.0.0.1:${this.port}/api/health`, {
+        token: this.sessionToken,
+      });
       this.state = 'RUNNING';
       this.emit('state', this.status());
       return this.status();
@@ -160,6 +173,7 @@ class RuntimeManager extends EventEmitter {
     if (!this.child) {
       this.state = 'STOPPED';
       this.port = null;
+      this.sessionToken = null;
       return this.status();
     }
     this.state = 'STOPPING';
@@ -168,6 +182,7 @@ class RuntimeManager extends EventEmitter {
     await killProcessTree(child);
     this.child = null;
     this.port = null;
+    this.sessionToken = null;
     this.state = 'STOPPED';
     this.emit('state', this.status());
     return this.status();
@@ -183,6 +198,7 @@ module.exports = {
   RuntimeManager,
   candidatePythonPaths,
   findPython,
+  healthOnce,
   reservePort,
   waitForHealth,
 };
