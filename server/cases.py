@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .domain import Rule, VerificationCase
+from .domain import Rule, RuleAuthority, VerificationCase
 
 
 def _c(id, title, source_ref, executor, target, counterpart=None, axis=None, angle_axis=None,
@@ -8,7 +8,7 @@ def _c(id, title, source_ref, executor, target, counterpart=None, axis=None, ang
     return VerificationCase(
         id=id, title=title, source="Sanitized DR500-style engineering rule", source_ref=source_ref,
         executor=executor, target=target, counterpart=counterpart, axis=axis, angle_axis=angle_axis,
-        rule=Rule(operator=operator, threshold=threshold, lower=lower, upper=upper, unit=unit),
+        rule=Rule(operator=operator, threshold=threshold, lower=lower, upper=upper, unit=unit, authority=RuleAuthority.FORMAL),
         regression_epsilon=epsilon, note=note,
     )
 
