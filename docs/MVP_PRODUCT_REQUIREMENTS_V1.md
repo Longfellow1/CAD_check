@@ -51,6 +51,10 @@ CAD Check 是面向汽车工程校核场景的独立桌面工具。MVP 不做 CA
 - `occurrence_id`：当前模型版本内的装配对象身份。
 - `semantic_binding_id`：跨版本用于工程绑定的业务身份；MVP 可人工定义，不做自动语义绑定。
 
+同一 `Model SHA + Import Schema Version` 重复导入时，`occurrence_id` 必须确定性复现；不得直接使用内存地址、临时数组下标或 Viewer Mesh ID。若导入 Schema 变化导致 ID 不兼容，系统必须显式标记 Replay / Regression 需要重新绑定。
+
+Readiness 按能力分开表达：模型可以“可预览但部分 Case 不可校核”。局部无效 B-Rep 或 Binding 缺失只阻断受影响 Case，不应无差别阻断整车其他有效 Case；界面必须展示受影响对象与 Case 数量。
+
 ### 5.2 Verification Case
 
 MVP 使用人工定义的 15–25 条 Case，不做 AI 自动规则编译。
@@ -110,10 +114,11 @@ Golden Case 必须明确对象、方法、坐标系、单位、公差和外部/�
 
 每条可执行结果产生结构化 Evidence：
 
-- Case ID、模型版本、对象 ID/Path。
+- Run ID、Check Set/Case ID 与版本、模型版本、对象 ID/Path。
 - Model SHA、Rule Version、Executor Version。
 - Binding Snapshot。
-- 计算值、阈值、单位、公差、坐标系、结果。
+- Measurement Method / Executor 参数。
+- 计算值、阈值、单位、公差、坐标系定义、结果。
 - 最近点 / 基准信息。
 - Camera / Visibility / Highlight 状态。
 - 截图。
@@ -137,6 +142,8 @@ Replay State 至少包含：
 
 点击历史记录后应自动恢复到可复核状态。
 
+若原模型、Viewer Derivative 或对象身份版本不兼容，Replay 必须降级为“结构化记录 + 原 Evidence 截图”查看，并明确提示无法重建三维状态，不能静默绑定到相似对象。
+
 ### 5.8 Regression
 
 支持冻结 Check Set 对 V1 / V2 执行并比较。
@@ -151,6 +158,8 @@ Replay State 至少包含：
 - `NON_COMPARABLE`
 
 用户可以从 Regression 结果直接进入 Evidence Replay。
+
+V1/V2 只有在 Case/Rule/Executor/Measurement Method/单位与坐标系合同兼容，且两版 `semantic_binding_id` 均能解析时才允许比较。任一条件不成立必须输出 `NON_COMPARABLE`，不得只按 Case ID 或对象名称强行比较。
 
 ## 6. Viewer 能力边界
 
@@ -176,7 +185,7 @@ MVP 必须具备：
 
 ## 7. 性能与稳定性要求
 
-- 首次 STEP 导入 1–3 分钟可接受，但 UI 不得假死。
+- 代表性 Golden/Coverage 模型首次 STEP 导入目标为 1–3 分钟；Scania 冷启动单独按 Scale Gate 记录，不用该目标伪装为已达标，但 UI 始终不得假死。
 - 第一批可视几何出现后必须允许旋转/缩放。
 - 二次打开应显著快于首次导入。
 - 大模型加载不能无限增加 Renderer 常驻内存。
@@ -210,9 +219,11 @@ Scania 约 295MB STEP 作为当前压力测试基线，不要求 MVP 首次打�
 
 `FAIL → 自动定位/标注 → Evidence → 保存 → Replay` 可一键完成，不需要工程师重新人工选择对象复现证据。
 
+至少由 1 名目标工程师在无开发者代操作的情况下完成该闭环；记录完成时间、阻断点和是否需要回到 CATIA 重新测量。若仍需重新测量才能信任结果，G2 不通过。
+
 ### G3 工程规模
 
-Scania 级复杂模型可以完成 Overview、Pick、Hide/Isolate 和 FAIL Evidence 定位；连续交互不出现应用崩溃或整场景丢失。
+Scania 级复杂模型可以完成 Overview、Pick、Hide/Isolate 和固定 occurrence pair 的定位/Evidence 叠加；连续交互不出现应用崩溃或整场景丢失。该叠加只验证规模下的交互链路，不宣称 Scania 已形成 FORMAL 工程结论。
 
 ### G4 可交付性
 

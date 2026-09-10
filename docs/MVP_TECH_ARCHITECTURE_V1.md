@@ -111,6 +111,8 @@ Progress 不要求虚构精确百分比；STEP/XCAF 无可靠细粒度回调时�
 
 若底层 OCCT 调用无法安全软取消，Cancel 允许终止 CAD Worker 并重启，由 Controller 保持可用。
 
+控制面验收使用同一 Scania 长任务：Health/Job Status 响应 P95 不高于 1 秒，Cancel 请求 2 秒内得到确认；无法软取消时必须进入明确的 Worker Terminating/Restarting 状态，不能继续显示假进度。
+
 ## 4. Canonical AssemblyTree 与对象身份
 
 AssemblyTree 是 P0 工程数据骨架，必须由 XCAF/STEP 原生结构生成，不从 Viewer Scene 反推。
@@ -134,6 +136,13 @@ AssemblyTree 是 P0 工程数据骨架，必须由 XCAF/STEP 原生结构生成�
 - `geometry_ref`：单次导入中的几何实体引用，可随重新解析变化。
 - `occurrence_id`：模型版本内稳定的装配 occurrence 身份，Tree / Viewer / Evidence 必须统一使用。
 - `semantic_binding_id`：跨 V1/V2 用于工程绑定的业务身份；MVP 可人工映射，自动 Semantic Binding 放 P1。
+
+身份不变量：
+
+- 同一 `model_sha + import_schema_version` 的重复导入必须生成相同 occurrence ID。
+- occurrence ID 不能来自内存地址、遍历数组下标或 Viewer Mesh ID。
+- 同一 Prototype 的多个装配实例必须拥有不同 occurrence ID，但可共享 geometry/prototype 引用。
+- Evidence 必须保存 `import_schema_version`；版本不兼容时 Replay/Regression fail closed，不做名称猜测绑定。
 
 Viewer Geometry Chunk 只持有 `occurrence_id → mesh/prototype` 映射，不拥有父子关系。
 
@@ -271,6 +280,8 @@ disposeDetail()
 
 564 个叶件全部 Detail 是否最终加载完成作为 benchmark 记录项，不作为 MVP 生死 Gate。
 
+若两个候选均未通过 Tree、Pick→occurrence ID、连续交互或 Windows 任一硬项，则 Gate 结果为 `NO WINNER / M0 BLOCKED`，不得为了遵守二选一时间盒强行冻结一个失败实现。
+
 ## 8. STEP 与 Viewer 数据边界
 
 原则：一个 STEP 不应同时在 Renderer 和 Python Runtime 内重复作为工程真值解析。
@@ -315,11 +326,17 @@ Evidence：局部高精度
 ```json
 {
   "evidence_id": "...",
+  "run_id": "...",
+  "check_set_id": "...",
+  "check_set_version": "...",
   "case_id": "...",
+  "case_version": "...",
+  "rule_maturity": "FORMAL",
   "rule_version": "...",
   "executor_version": "...",
   "model_version": "V2",
   "model_sha": "...",
+  "import_schema_version": "...",
   "binding_snapshot": {
     "target": "occ:...",
     "counterpart": "occ:...",
@@ -331,7 +348,12 @@ Evidence：局部高精度
   "source_unit": "mm",
   "threshold": 10.0,
   "tolerance": 0.1,
-  "coordinate_system": "vehicle",
+  "measurement_method": "minimum_distance",
+  "executor_params": {},
+  "coordinate_system": {
+    "id": "vehicle",
+    "transform_to_model": [1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]
+  },
   "closest_points": [[0,0,0],[0,0,8]],
   "view_state": {
     "camera": {},
@@ -348,6 +370,8 @@ Evidence：局部高精度
 
 Replay 只重建工程状态，不依赖录屏。
 
+Regression 的可比键至少包含 Case/Rule/Executor/Measurement Method/单位/坐标系合同和两版 semantic binding。任一项不兼容或绑定无法解析时输出 `NON_COMPARABLE`；不得只靠对象名称、Tree 顺序或 Mesh ID 比较。
+
 ## 11. Packaging 与双平台
 
 MVP：
@@ -358,7 +382,7 @@ MVP：
 - Windows x64 在 Windows 构建。
 - 当前不做签名、notarization、auto-update。
 
-Windows Smoke 必须在 Week 1 完成，不等 Week 3：
+Windows Smoke 必须在 Week 1 完成，不等 Week 3。Smoke 可复用现有最小 Evidence JSON/PNG，不要求在 Week 1 提前完成 Week 2 的完整 Evidence Contract：
 
 `Electron → Runtime → 小 STEP → Minimum Clearance → Evidence → Worker/Runtime Restart → 正常退出`
 
@@ -404,5 +428,5 @@ CATIA
 6. Viewer Pick / Visibility / Evidence 均以 occurrence ID 对齐。
 7. Minimum Clearance / Directional Distance / Angle 各有至少 1 个可信 Golden Case。
 8. FAIL 能自动定位并叠加 Evidence。
-9. Scania 级模型完成 Overview / Pick / Hide/Isolate / Evidence 定位时应用不崩溃。
+9. Scania 级模型完成 Overview / Pick / Hide/Isolate / 固定 occurrence pair Evidence 叠加时应用不崩溃；该项仅验证规模链路，不作为 FORMAL Check。
 10. Viewer 可替换而不改 Verification Core / Evidence Contract。

@@ -72,6 +72,8 @@
 
 Assembly Tree 必须来自 Python/XCAF Canonical AssemblyTree，不能从当前已加载 Mesh 反推，因此即使局部几何尚未加载，树层级仍应完整可浏览。
 
+Readiness 分开显示“可预览”和“可校核”。局部无效 B-Rep/Binding 缺失时，用户仍可浏览模型并运行不受影响的 Case；受影响 Case 单独 BLOCKED，并可查看对象与原因。
+
 ## 5. 工程校核流程
 
 ### 5.1 运行
@@ -157,6 +159,8 @@ Evidence 背后必须绑定 Model SHA、Rule Version、Executor Version、Bindin
 - Measurement / Annotation。
 
 Replay 后仍可继续旋转、选择和复核。
+
+若 Model SHA、Import Schema 或 Viewer Derivative 不兼容，回放页保留结构化记录和原截图，并显示“当前无法重建三维状态”；禁止自动选择名称相近对象制造伪回放。
 
 ## 9. Canonical Assembly Tree
 
@@ -244,5 +248,7 @@ Scania 回归时，不允许再次出现“源装配有父子结构、Viewer Tre
 6. 保存并 Replay。
 7. 切换 V1/V2 查看 Regression。
 8. Worker 异常后能够恢复而不重启整个 App。
+
+验收至少邀请 1 名目标工程师，在开发者不代操作的情况下完成上述主闭环，并记录完成时间、求助点、误操作和是否回到 CATIA 重新测量。若无法独立完成，或必须回到 CATIA 才能信任 Evidence，则本轮 UX Gate 不通过。
 
 目标：技术复杂性由系统承担，不让 Viewer/Runtime 细节打断工程复核任务。

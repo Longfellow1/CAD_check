@@ -28,7 +28,7 @@ W4      Scania/真实工程案例收口与 Buffer（如需要）
 
 3 周为挑战目标，第 4 周作为真实数据、Windows 差异和 Scania 稳定性 Buffer，不新增大功能。
 
-## 3. Gate 0：Viewer 选型（0.5–1 天）
+## 3. Gate 0：Viewer 选型（1–2 天）
 
 ### 目标
 
@@ -38,6 +38,7 @@ W4      Scania/真实工程案例收口与 Buffer（如需要）
 
 - 小型 Controlled STEP。
 - Scania 约 295MB STEP。
+- 从 Scania XCAF 基线导出的固定 Canonical Tree/occurrence 映射 Fixture，避免 Gate 依赖 Week 1 完整实现。
 - Mac M4 Pro 24GB。
 - Windows x64 验证机。
 
@@ -69,6 +70,7 @@ W4      Scania/真实工程案例收口与 Buffer（如需要）
 
 - NARU 性能/稳定性明显占优且 Electron/Windows Gate 通过 → NARU。
 - NARU Alpha / WebGPU 风险阻断，cad-3d-viewer 达到 MVP 稳定线 → cad-3d-viewer。
+- 两者任一硬项均不通过 → `NO WINNER / M0 BLOCKED`；不得强行冻结失败实现，由项目负责人决定更换候选或调整 G3 范围。
 - Gate 后冻结 Viewer Interface；后续候选若失败可替换实现，但不改 Verification Core。
 
 ### Exit Criteria
@@ -82,7 +84,9 @@ W4      Scania/真实工程案例收口与 Buffer（如需要）
 
 Week 1 不结束前必须在 Windows x64 跑通：
 
-`Electron 启动 → Python Runtime 启动 → 小 STEP → Minimum Clearance → Evidence → Worker/Runtime Restart → 正常退出`
+`Electron 启动 → Python Runtime 启动 → 小 STEP → Minimum Clearance → 最小 Evidence JSON/PNG → Worker/Runtime Restart → 正常退出`
+
+这里复用现有最小 Evidence 能力验证 Windows 链路，不要求提前完成 Week 2 的完整 Evidence Contract。
 
 同时覆盖：
 
@@ -201,6 +205,7 @@ Evidence 至少保存：
 - FORMAL FAIL 一键进入 Evidence。
 - Evidence 不需要人工重新选择对象才能复核。
 - 保存后可完整重建关键工程上下文。
+- 至少 1 名目标工程师无需开发者代操作完成 FAIL → Evidence → 保存，并记录是否需要返回 CATIA 重新测量。
 
 ## 7. Week 3：Replay / Regression / Coverage / 双平台
 
@@ -222,6 +227,7 @@ Evidence 至少保存：
 - NEW_FAIL / FIXED / IMPROVED / REGRESSED / UNCHANGED / NON_COMPARABLE。
 - V1/V2 Evidence 切换。
 - Delta 展示。
+- Case/Rule/Executor/Measurement Method/单位/坐标系或 semantic binding 不兼容时输出 NON_COMPARABLE，禁止按名称强行比较。
 
 ### Coverage Matrix
 
@@ -251,7 +257,7 @@ Evidence 至少保存：
 
 重点：
 
-- Scania Overview / Pick / Hide-Isolate / Evidence 定位稳定性。
+- Scania Overview / Pick / Hide-Isolate / 固定 occurrence pair Evidence 叠加稳定性；只验规模链路，不宣称 FORMAL 工程结论。
 - Warm Open / Cache。
 - 连续 Case 切换内存泄漏。
 - 无效 B-Rep 降级。
