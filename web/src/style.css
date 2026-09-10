@@ -47,6 +47,70 @@ header .status { margin-left: auto; max-width: 560px; }
 }
 .primary { background: #172554; color: #fff; border-color: #172554; }
 .model-button.selected { background: #e0e7ff; border-color: #6366f1; }
+.model-workspace {
+  min-height: 64px;
+  background: #fff;
+  border-bottom: 1px solid #e2e7ee;
+  padding: 8px 16px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.workspace-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 210px;
+}
+.workspace-title b { font-size: 13px; }
+.workspace-title span { color: #64748b; font-size: 11px; }
+.preview-picker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 8px;
+  border-left: 1px solid #e2e7ee;
+  color: #475569;
+  font-size: 12px;
+}
+.preview-picker select {
+  max-width: 240px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 6px 8px;
+  background: #fff;
+  color: #172033;
+}
+.preview-picker button { padding: 6px 9px; font-size: 12px; }
+.preview-picker button:disabled { cursor: wait; }
+.preview-status {
+  max-width: 360px;
+  color: #64748b;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.upload-picker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 16px;
+  border-left: 1px solid #e2e7ee;
+  color: #475569;
+  font-size: 12px;
+}
+.upload-picker input[type="file"] {
+  max-width: 250px;
+  color: #475569;
+  font-size: 11px;
+}
+.upload-picker button { padding: 6px 9px; font-size: 12px; }
+.upload-status {
+  max-width: 330px;
+  color: #64748b;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
 .run-id { margin-left: auto; color: #64748b; font-size: 12px; }
 .mode-tabs { display: flex; gap: 4px; }
 .mode-tab { border-radius: 6px; padding: 7px 9px; font-size: 12px; }
@@ -130,7 +194,7 @@ main {
   grid-template-columns: 270px minmax(680px, 1fr) 320px;
   gap: 10px;
   padding: 0 10px 10px;
-  height: calc(100vh - 290px);
+  height: calc(100vh - 360px);
   min-height: 560px;
 }
 .panel, .viewer {
@@ -173,6 +237,9 @@ main {
 #measure { color: #dc2626; }
 #cad { height: calc(100% - 42px); min-height: 560px; }
 .viewer-empty { display: grid; place-items: center; height: 100%; color: #94a3b8; }
+.preview-gate { align-content: center; gap: 8px; text-align: center; }
+.preview-gate b { color: #475569; font-size: 16px; }
+.preview-gate span { font-size: 12px; }
 .evidence-overlay {
   position: absolute;
   top: 54px;

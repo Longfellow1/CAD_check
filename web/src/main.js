@@ -36,6 +36,9 @@ const state = {
   run: null,
   selected: null,
   model: 'V2',
+  viewerModel: 'V2',
+  previewModel: 'V2',
+  previewOnly: false,
   models: {},
   cards: [],
   inventory: {},
@@ -59,10 +62,28 @@ root.innerHTML = `
       `).join('')}
     </div>
     <button id="run" class="primary">运行版本回归</button>
-    <button id="v1" class="model-button">查看 V1</button>
-    <button id="v2" class="model-button selected">查看 V2</button>
+    <button id="v1" class="model-button">加载 V1</button>
+    <button id="v2" class="model-button selected">加载 V2</button>
     <span id="rid" class="run-id">尚未运行</span>
   </nav>
+  <section id="model-workspace" class="model-workspace" aria-label="模型工作区">
+    <div class="workspace-title">
+      <b>模型工作区</b>
+      <span>选择已登记模型，或上传 STEP 后再加载三维</span>
+    </div>
+    <div id="preview-picker" class="preview-picker" aria-label="三维模型预览">
+      <label for="preview-model">预览模型</label>
+      <select id="preview-model" aria-label="选择三维预览模型"></select>
+      <button id="preview-load" type="button">加载三维</button>
+      <span id="preview-status" class="preview-status" role="status">等待模型目录…</span>
+    </div>
+    <div class="upload-picker">
+      <label for="step-upload">上传 STEP</label>
+      <input id="step-upload" type="file" accept=".stp,.step" />
+      <button id="upload-step" type="button">上传并加载</button>
+      <span id="upload-status" class="upload-status" role="status">支持 .stp / .step，导入后可用于三维预览。</span>
+    </div>
+  </section>
   <section id="mode-config" class="mode-config"></section>
   <section id="guide" class="guide" aria-label="手测步骤">
     <div class="step active" data-step="run"><b>1</b><span>运行校验</span><small>生成当前模式结果</small></div>
@@ -158,11 +179,187 @@ function ensureViewer() {
 
 function setModel(model) {
   state.model = model;
+  state.viewerModel = model;
+  state.previewModel = model;
+  state.previewOnly = false;
   for (const key of ['V1', 'V2']) {
     const button = $(`#v${key.slice(1)}`);
     if (button) button.classList.toggle('selected', key === model);
   }
-  $('#vt').textContent = `${state.model} · ${state.selected || '真实 STEP 三维视图'}`;
+  syncPreviewPicker();
+  $('#vt').textContent = `${state.viewerModel} · ${state.selected || '真实 STEP 三维视图'}`;
+}
+
+function setViewerModel(model) {
+  state.viewerModel = model;
+  for (const key of ['V1', 'V2']) {
+    const button = $(`#v${key.slice(1)}`);
+    if (button) button.classList.toggle('selected', key === model && !state.previewOnly);
+  }
+  $('#vt').textContent = `${state.viewerModel} · ${state.selected || '真实 STEP 三维视图'}`;
+}
+
+function syncPreviewPicker() {
+  const select = $('#preview-model');
+  if (!select || !state.models[state.previewModel]) return;
+  select.value = state.previewModel;
+  updatePreviewStatus();
+}
+
+function updatePreviewStatus() {
+  const select = $('#preview-model');
+  const status = $('#preview-status');
+  if (!select || !status) return;
+  const key = select.value;
+  const model = state.models[key];
+  if (!model) {
+    status.textContent = '没有可用模型';
+    return;
+  }
+  state.previewModel = key;
+  const leaves = model.leaf_count == null ? '叶子件数量未知' : `${model.leaf_count} 个叶子件`;
+  const heavy = Number(model.leaf_count) >= 100;
+  const current = state.viewerReady
+    ? state.viewerModel === key ? `当前显示 ${key}` : `当前显示 ${state.viewerModel}`
+    : '当前未加载三维';
+  status.textContent = `${key} · ${leaves}${heavy ? ' · 大模型，加载可能较慢' : ''} · ${current}`;
+  const loadButton = $('#preview-load');
+  if (loadButton && !loadButton.disabled) {
+    loadButton.textContent = state.viewerReady && state.viewerModel === key
+      ? '重新加载三维'
+      : `加载 ${key}`;
+  }
+}
+
+function showPreviewGate(model) {
+  const metadata = state.models[model];
+  if (!metadata) return;
+  state.previewModel = model;
+  state.previewOnly = true;
+  state.viewerReady = false;
+  setViewerModel(model);
+  state.viewer?.clear?.();
+  state.viewer = null;
+  state.display = null;
+  document.querySelector('.evidence-overlay')?.remove();
+  $('#measure').textContent = '';
+  $('#vt').textContent = `${model} · 等待加载`;
+  const leaves = metadata.leaf_count == null ? '叶子件数量未知' : `${metadata.leaf_count} 个叶子件`;
+  const loadHint = Number(metadata.leaf_count) >= 100
+    ? '大模型，加载期间请勿重复刷新或重复点击。'
+    : `点击“加载 ${model}”开始三维预览。`;
+  $('#cad').innerHTML = `
+    <div class="viewer-empty preview-gate">
+      <b>${model} 已登记</b>
+      <span>${leaves} · ${loadHint}</span>
+    </div>
+  `;
+  setStep('model', '');
+  setStep('evidence', '');
+  setStatus(`${model} 已登记，等待手动加载`, 'ok');
+  syncPreviewPicker();
+}
+
+function initializePreviewPicker(preferredModel = null) {
+  const select = $('#preview-model');
+  if (!select) return;
+  const preferred = preferredModel && state.models[preferredModel]
+    ? preferredModel
+    : state.models.SCANIA
+      ? 'SCANIA'
+      : state.models[state.previewModel]
+        ? state.previewModel
+        : state.model;
+  state.previewModel = state.models[preferred] ? preferred : Object.keys(state.models)[0];
+  select.innerHTML = Object.entries(state.models)
+    .map(([key, model]) => `<option value="${key}">${key} · ${model.model_id}</option>`)
+    .join('');
+  select.value = state.previewModel;
+  select.onchange = () => {
+    updatePreviewStatus();
+    if (select.value !== state.viewerModel || !state.viewerReady) {
+      showPreviewGate(select.value);
+    }
+  };
+  $('#preview-load').onclick = loadPreviewModel;
+  $('#upload-step').onclick = uploadStepModel;
+  updatePreviewStatus();
+}
+
+async function uploadStepModel() {
+  const input = $('#step-upload');
+  const button = $('#upload-step');
+  const status = $('#upload-status');
+  const file = input?.files?.[0];
+  if (!input || !button || !file || state.busy) {
+    if (status && !file) status.textContent = '请先选择 .stp 或 .step 文件。';
+    return;
+  }
+
+  const form = new FormData();
+  form.append('file', file, file.name);
+  button.disabled = true;
+  input.disabled = true;
+  if (status) status.textContent = `${file.name} 正在上传并导入…`;
+  setStatus(`${file.name} 正在上传并导入 STEP…`, 'working');
+  try {
+    const result = await api('/api/models/upload', {method: 'POST', body: form});
+    state.models = await api('/api/models');
+    initializePreviewPicker(result.key);
+    if (status) {
+      const readiness = result.readiness?.status || '未完成工程 Binding';
+      status.textContent = `${result.filename} 已登记 · ${result.bytes} bytes · 工程 readiness：${readiness}`;
+    }
+    await loadPreviewModel();
+  } catch (error) {
+    if (status) status.textContent = `上传失败：${error.message}`;
+    setStatus(`STEP 上传失败：${error.message}`, 'error');
+  } finally {
+    button.disabled = false;
+    input.disabled = false;
+    input.value = '';
+  }
+}
+
+async function loadPreviewModel() {
+  const select = $('#preview-model');
+  const button = $('#preview-load');
+  if (!select || !button || state.busy) return;
+  const model = select.value;
+  if (!model || !state.models[model]) return;
+  const previousModel = state.viewerReady && state.viewerModel !== model
+    ? state.viewerModel
+    : null;
+  state.previewModel = model;
+  state.previewOnly = true;
+  setViewerModel(model);
+  button.disabled = true;
+  button.textContent = '正在加载…';
+  setStatus(`${model} 正在加载三维…`, 'working');
+  try {
+    await renderViewer({standalone: true});
+    button.textContent = '重新加载三维';
+    setStatus(`${model} 三维已加载`, 'ok');
+  } catch (error) {
+    state.previewOnly = true;
+    button.textContent = '加载三维';
+    const fallbackModel = previousModel || (model !== 'V2' && state.models.V2 ? 'V2' : null);
+    if (fallbackModel && fallbackModel !== model) {
+      state.previewModel = fallbackModel;
+      setViewerModel(fallbackModel);
+      try {
+        await renderViewer({standalone: true});
+      } catch {
+        // Keep the original error visible if the small fallback also fails.
+      }
+    } else {
+      showPreviewGate(model);
+    }
+    setStatus(`三维加载失败：${error.message}`, 'error');
+  } finally {
+    button.disabled = false;
+    updatePreviewStatus();
+  }
 }
 
 function renderEvidenceOverlay(row) {
@@ -182,12 +379,13 @@ function renderEvidenceOverlay(row) {
   $('#cad').append(overlay);
 }
 
-async function renderViewer() {
+async function renderViewer({standalone = false} = {}) {
   ensureViewer();
   setStep('model', 'active');
-  const evidenceUrl = state.run && state.selected
+  const useEvidence = !standalone && !state.previewOnly && state.run && state.selected;
+  const evidenceUrl = useEvidence
     ? `/api/runs/${state.run.run_id}/evidence/${state.selected}/viewer?model=${state.model}`
-    : `/api/models/${state.model}/viewer`;
+    : `/api/models/${state.viewerModel}/viewer`;
   const payload = await api(evidenceUrl);
   if (!payload?.shapes?.parts?.length) {
     throw new Error('viewer payload 没有可显示的 shape');
@@ -205,14 +403,15 @@ async function renderViewer() {
   state.viewer.presetCamera?.('iso');
   state.viewerReady = true;
   setStep('model', 'done');
-  if (state.run && state.selected) {
+  if (useEvidence) {
     const row = currentRows().find((item) => item.caseId === state.selected);
     renderEvidenceOverlay(row);
     setStep('evidence', 'done');
   } else {
     renderEvidenceOverlay(null);
   }
-  setStatus(`${state.model} 三维已加载`, 'ok');
+  setStatus(`${state.viewerModel} 三维已加载`, 'ok');
+  updatePreviewStatus();
 }
 
 function fillModelSelect(select, selected = state.model) {
@@ -537,9 +736,13 @@ async function selectCase(caseId) {
   const row = currentRows().find((item) => item.caseId === caseId);
   if (!row) return;
   state.selected = caseId;
+  state.previewOnly = false;
+  state.previewModel = state.model;
+  setViewerModel(state.model);
+  syncPreviewPicker();
   renderCaseList();
   renderDetail(row);
-  $('#vt').textContent = `${state.model} · ${row.title}`;
+  $('#vt').textContent = `${state.viewerModel} · ${row.title}`;
   setStep('evidence', 'active');
   try {
     await renderViewer();
@@ -563,11 +766,15 @@ async function runMode() {
   state.run = null;
   state.selected = null;
   state.viewerReady = false;
+  state.previewOnly = false;
   $('#cases').innerHTML = '<div class="empty">正在运行…</div>';
   $('#detail').innerHTML = '<p class="hint">正在生成结果和证据…</p>';
   setStatus(`正在运行${MODES[state.mode].label}…`, 'working');
   try {
     let response;
+    if (state.mode === 'REGRESSION_COMPARE' && state.model !== 'V2') {
+      setModel('V2');
+    }
     if (state.mode === 'EXPLORE_MEASURE') {
       const model = $('#explore-model').value;
       state.model = model;
@@ -626,6 +833,8 @@ async function runMode() {
 
 async function switchModel(model) {
   setModel(model);
+  state.viewerReady = false;
+  setStatus(`${model} 正在加载三维…`, 'working');
   try {
     await renderViewer();
   } catch (error) {
@@ -640,6 +849,10 @@ async function switchMode(mode) {
   state.mode = mode;
   state.run = null;
   state.selected = null;
+  state.previewOnly = false;
+  if (mode === 'REGRESSION_COMPARE' && state.models.V2) {
+    setModel('V2');
+  }
   $('#rid').textContent = '尚未运行';
   $('#sum').innerHTML = '';
   $('#cases').innerHTML = '<div class="empty">尚未运行</div>';
@@ -657,8 +870,15 @@ async function boot() {
     state.cards = await api('/api/check-cards');
     if (!state.models.V1 || !state.models.V2) throw new Error('缺少 V1/V2 模型，请先运行 bootstrap');
     setStatus(`运行环境 READY · OCP ${readiness.python_packages['cadquery-ocp']}`, 'ok');
+    initializePreviewPicker();
     await renderModeConfig();
-    await renderViewer();
+    if (state.models.SCANIA) {
+      state.previewModel = 'SCANIA';
+      syncPreviewPicker();
+      showPreviewGate('SCANIA');
+    } else {
+      await renderViewer();
+    }
   } catch (error) {
     setStep('model', 'error');
     setStatus(`启动检查失败：${error.message}`, 'error');

@@ -3,10 +3,12 @@ from __future__ import annotations
 import base64
 import importlib.metadata
 import json
+import re
+import uuid
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -21,6 +23,9 @@ ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = ROOT / "models/demo_manifest.yaml"
 WEB_DIST = ROOT / "web/dist"
 WEB = WEB_DIST if WEB_DIST.exists() else ROOT / "web"
+UPLOAD_DIR = ROOT / ".cadcheck" / "uploads"
+UPLOAD_CHUNK_BYTES = 1024 * 1024
+MAX_UPLOAD_BYTES = 512 * 1024 * 1024
 workspace = Stage2Workspace(ROOT)
 if MANIFEST.exists() and (ROOT / "data/step/vehicle_v1.step").exists():
     try: workspace.load_manifest(MANIFEST)
@@ -64,6 +69,22 @@ class BindingRequest(BaseModel):
 class Screenshot(BaseModel):
     data_url: str
 
+
+def _upload_descriptor(filename: str | None) -> tuple[str, str, str, str]:
+    """Return safe runtime identifiers for a user-supplied STEP filename."""
+    original = Path(filename or "").name
+    suffix = Path(original).suffix.lower()
+    if suffix not in {".stp", ".step"}:
+        raise HTTPException(400, "仅支持 .stp 或 .step 文件")
+
+    stem = re.sub(r"[^A-Za-z0-9_-]+", "-", Path(original).stem)
+    stem = stem.strip("-_")[:48] or "step"
+    token = uuid.uuid4().hex[:10].upper()
+    key = f"UPLOAD_{token}"
+    model_id = f"uploaded-{stem.lower()}"
+    version = f"UPLOAD-{token}"
+    return key, model_id, version, suffix
+
 @app.get("/")
 def index(): return FileResponse(WEB / "index.html")
 
@@ -94,6 +115,53 @@ def register(req: RegisterModel):
         workspace.register_model(req.key, step=p, model_id=req.model_id, version=req.version, coordinate_contract=req.coordinate_contract)
         return workspace.readiness(req.key)
     except Exception as exc: raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/api/models/upload")
+def upload_model(file: UploadFile = File(...)):
+    """Persist and import one user-supplied STEP model for this server session."""
+    key, model_id, version, suffix = _upload_descriptor(file.filename)
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    target = UPLOAD_DIR / f"{key}{suffix}"
+    total = 0
+
+    try:
+        with target.open("wb") as output:
+            while True:
+                chunk = file.file.read(UPLOAD_CHUNK_BYTES)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > MAX_UPLOAD_BYTES:
+                    raise HTTPException(413, "STEP 文件超过 512 MB 限制")
+                output.write(chunk)
+
+        workspace.register_model(
+            key,
+            step=target,
+            model_id=model_id,
+            version=version,
+        )
+        readiness_report = workspace.readiness(key)
+    except HTTPException:
+        target.unlink(missing_ok=True)
+        raise
+    except Exception as exc:
+        target.unlink(missing_ok=True)
+        raise HTTPException(400, f"STEP 导入失败：{exc}") from exc
+    finally:
+        file.file.close()
+
+    return {
+        "status": "REGISTERED",
+        "key": key,
+        "model_id": model_id,
+        "version": version,
+        "filename": Path(file.filename or target.name).name,
+        "bytes": total,
+        "step": str(target),
+        "readiness": readiness_report,
+    }
 
 @app.get("/api/models/{key}/readiness")
 def readiness(key: str):
