@@ -1,10 +1,12 @@
 """Electron-desktop runtime entrypoint.
 
-The FastAPI process is an internal localhost sidecar for the Electron product.
-Standalone browser use is allowed only as a developer debug harness.
+The FastAPI process is an internal localhost Runtime Controller for the Electron
+product.  Standalone browser use is allowed only as a developer debug harness.
+Heavy OCP/OCCT work is submitted to an isolated CAD Worker through desktop_api.
 """
 from __future__ import annotations
 
+import atexit
 import os
 from typing import Any
 
@@ -12,19 +14,18 @@ from fastapi.responses import JSONResponse
 
 from .app import app as base_app, workspace, ROOT
 from .assembly_api import create_assembly_router
+from .desktop_api import create_desktop_router
 from .streaming_api import create_streaming_router
 
 base_app.include_router(create_assembly_router(workspace))
 base_app.include_router(create_streaming_router(workspace, ROOT))
+desktop_router, cad_worker_manager = create_desktop_router(ROOT)
+base_app.include_router(desktop_router)
+atexit.register(cad_worker_manager.shutdown)
 
 
 class DesktopSessionGuard:
-    """ASGI guard that can wrap an already-instantiated FastAPI app safely.
-
-    Tests may import/start the base app before importing this module, so adding
-    Starlette middleware at import time is unsafe. A thin ASGI wrapper keeps the
-    Electron session contract without mutating middleware after startup.
-    """
+    """ASGI guard that can wrap an already-instantiated FastAPI app safely."""
 
     def __init__(self, inner: Any, token: str | None):
         self.inner = inner
