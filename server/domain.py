@@ -62,6 +62,7 @@ class Rule(BaseModel):
 
 class VerificationCase(BaseModel):
     id: str
+    version: str = "1.0"
     title: str
     source: str
     source_ref: str
@@ -74,6 +75,7 @@ class VerificationCase(BaseModel):
     verification_method: str = "ANALYSIS_GEOMETRY"
     workflow_id: str = "GEOMETRY_CHECK_V1"
     required_bindings: list[str] = Field(default_factory=list)
+    applicable_versions: list[str] = Field(default_factory=lambda: ["*"])
     rule: Rule | None = None
     regression_epsilon: float = 0.5
     note: str = ""
@@ -94,6 +96,7 @@ class CheckCard(BaseModel):
     angle_axis: Literal["X", "Y", "Z"] | None = None
     workflow_id: str = "GEOMETRY_CHECK_V1"
     required_bindings: list[str] = Field(default_factory=list)
+    applicable_versions: list[str] = Field(default_factory=lambda: ["*"])
     rule: Rule
     regression_epsilon: float = 0.5
     evidence: dict[str, Any] = Field(default_factory=dict)
@@ -103,6 +106,7 @@ class CheckCard(BaseModel):
     def to_case(self) -> VerificationCase:
         return VerificationCase(
             id=self.id,
+            version=self.version,
             title=self.title,
             source=self.source,
             source_ref=self.source_ref,
@@ -115,6 +119,7 @@ class CheckCard(BaseModel):
             verification_method=self.verification_method,
             workflow_id=self.workflow_id,
             required_bindings=self.required_bindings,
+            applicable_versions=self.applicable_versions,
             rule=self.rule,
             regression_epsilon=self.regression_epsilon,
             note=self.note,
@@ -122,11 +127,11 @@ class CheckCard(BaseModel):
 
 
 class Evidence(BaseModel):
-    """Auditable engineering evidence plus reconstructable view state.
+    """Auditable engineering evidence plus reconstructable Viewer state.
 
-    Geometry truth is still the CheckExecution value produced by OCP/OCCT.  The
-    fields below make that result reproducible and allow the Electron Viewer to
-    restore context without guessing by object name.
+    The engineering value is always produced by OCP/OCCT.  These fields make a
+    result traceable and allow Electron Replay to restore the exact context or
+    fail closed when the original model/identity contract no longer matches.
     """
 
     focus_ids: list[str]
@@ -137,17 +142,25 @@ class Evidence(BaseModel):
     camera_preset: str = "iso"
     annotation: str = ""
 
+    evidence_id: str | None = None
+    run_id: str | None = None
+    check_set_id: str | None = None
+    case_id: str | None = None
+    case_version: str | None = None
     model_sha: str | None = None
     import_schema_version: str | None = None
     rule_version: str | None = None
     executor_version: str | None = None
     measurement_method: str | None = None
+    approximation: str | None = None
     executor_params: dict[str, Any] = Field(default_factory=dict)
     binding_snapshot: dict[str, Any] = Field(default_factory=dict)
+    rule_snapshot: dict[str, Any] = Field(default_factory=dict)
     coordinate_system: dict[str, Any] = Field(default_factory=dict)
     source_unit: str | None = None
     tolerance: float | None = None
     threshold: float | None = None
+    runtime_info: dict[str, Any] = Field(default_factory=dict)
     view_state: dict[str, Any] = Field(default_factory=dict)
     screenshot: str | None = None
 
