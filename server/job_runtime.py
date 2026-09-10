@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-"""Runtime Controller for isolated CAD Worker jobs.
+"""Responsive Runtime Controller for isolated CAD Worker jobs.
 
-FastAPI owns this controller; blocking OCP/OCCT work runs in a separate Python
-process.  The controller therefore keeps health/status/cancel responsive even
-when a CAD call is pathological.
+The FastAPI process owns this manager but never executes blocking OCCT work.
+Every heavy operation is queued to a separate Python process.  If a native call
+cannot cooperate with cancellation, the Controller terminates and replaces the
+Worker while keeping Electron and the API responsive.
 """
 
 from datetime import datetime, timezone
@@ -24,6 +25,7 @@ import yaml
 
 
 TERMINAL_STATES = {"SUCCEEDED", "FAILED", "CANCELLED", "TIMED_OUT"}
+HEARTBEAT_STALE_SECONDS = 3.0
 
 
 def now_iso() -> str:
@@ -59,6 +61,7 @@ class CadWorkerManager:
         self._lock = threading.RLock()
         self._stop_monitor = threading.Event()
         self._monitor: threading.Thread | None = None
+        self._orphan_recovery_done = False
 
     def _status_path(self, job_id: str) -> Path:
         return self.spool / f"{job_id}.status.json"
@@ -70,7 +73,7 @@ class CadWorkerManager:
         return self.spool / f"{job_id}.request.json"
 
     def model_descriptors(self) -> dict[str, dict[str, Any]]:
-        """List models without parsing STEP geometry."""
+        """List model paths without parsing STEP geometry."""
         result: dict[str, dict[str, Any]] = {}
         manifest_path = self.root / "models" / "demo_manifest.yaml"
         if manifest_path.exists():
@@ -97,23 +100,30 @@ class CadWorkerManager:
             if source.exists():
                 result[key] = {**spec, "key": key, "source": spec.get("source", "local")}
 
-        # Developer/local engineering datasets stay outside git.  Discover them
-        # by filename only; do not parse them on Runtime startup.
+        # Local engineering datasets stay outside git.  Discover by filename
+        # only: Runtime startup must never parse a 295 MB vehicle implicitly.
         step_dir = self.root / "data" / "step"
         if step_dir.exists():
-            controlled_names = {Path(item["step"]).name for item in result.values() if item.get("source") == "controlled"}
+            controlled_names = {
+                Path(item["step"]).name
+                for item in result.values()
+                if item.get("source") == "controlled"
+            }
             for source in sorted([*step_dir.glob("*.step"), *step_dir.glob("*.stp")]):
                 if source.name in controlled_names:
                     continue
                 key = "SCANIA" if "scania" in source.stem.lower() else _safe_key(source.stem)
-                result.setdefault(key, {
-                    "key": key,
-                    "step": str(source.resolve()),
-                    "model_id": source.stem,
-                    "version": "LOCAL",
-                    "coordinate_contract": "X-forward/Y-left/Z-up",
-                    "source": "local-discovered",
-                })
+                result.setdefault(
+                    key,
+                    {
+                        "key": key,
+                        "step": str(source.resolve()),
+                        "model_id": source.stem,
+                        "version": "LOCAL",
+                        "coordinate_contract": "X-forward/Y-left/Z-up",
+                        "source": "local-discovered",
+                    },
+                )
         return result
 
     def register_model_path(
@@ -157,16 +167,66 @@ class CadWorkerManager:
         else:
             kwargs["start_new_session"] = True
         return subprocess.Popen(
-            [sys.executable, "-m", "server.cad_worker", "--root", str(self.root), "--spool", str(self.spool)],
+            [
+                sys.executable,
+                "-m",
+                "server.cad_worker",
+                "--root",
+                str(self.root),
+                "--spool",
+                str(self.spool),
+            ],
             **kwargs,
         )
 
+    def _mark_nonterminal(self, job_id: str, *, state: str, phase: str, message: str, error_code: str) -> None:
+        status = _load_json(self._status_path(job_id), {}) or {}
+        if status.get("state") in TERMINAL_STATES:
+            return
+        _atomic_json(
+            self._status_path(job_id),
+            {
+                **status,
+                "state": state,
+                "progress_phase": phase,
+                "message": message,
+                "error_code": error_code,
+                "error_message": message,
+                "updated_at": now_iso(),
+                "finished_at": now_iso(),
+            },
+        )
+
+    def _recover_orphans(self) -> None:
+        if self._orphan_recovery_done:
+            return
+        current = _load_json(self.spool / "current.json") or {}
+        if current.get("job_id"):
+            self._mark_nonterminal(
+                current["job_id"],
+                state="FAILED",
+                phase="CONTROLLER_RECOVERED",
+                message="Runtime Controller restarted before CAD job completed",
+                error_code="CONTROLLER_RESTARTED",
+            )
+        (self.spool / "current.json").unlink(missing_ok=True)
+        for request in self.spool.glob("*.request.json"):
+            job_id = request.name.removesuffix(".request.json")
+            self._mark_nonterminal(
+                job_id,
+                state="FAILED",
+                phase="CONTROLLER_RECOVERED",
+                message="Queued CAD job belonged to a previous Runtime session",
+                error_code="CONTROLLER_RESTARTED",
+            )
+            request.unlink(missing_ok=True)
+        self._orphan_recovery_done = True
+
     def ensure_running(self) -> dict[str, Any]:
         with self._lock:
-            if self.process is not None and self.process.poll() is None:
-                self._ensure_monitor()
-                return self.worker_status()
-            self.process = self._spawn_worker()
+            self._recover_orphans()
+            if self.process is None or self.process.poll() is not None:
+                self.process = self._spawn_worker()
             self._ensure_monitor()
             return self.worker_status()
 
@@ -200,45 +260,66 @@ class CadWorkerManager:
         finally:
             self.process = None
 
+    def _replace_worker(self) -> None:
+        self._terminate_worker()
+        (self.spool / "current.json").unlink(missing_ok=True)
+        if not self._stop_monitor.is_set():
+            self.process = self._spawn_worker()
+
     def restart(self) -> dict[str, Any]:
         with self._lock:
-            current = _load_json(self.spool / "current.json")
-            self._terminate_worker()
-            (self.spool / "current.json").unlink(missing_ok=True)
-            if current:
-                job_id = current.get("job_id")
-                status = _load_json(self._status_path(job_id), {}) or {}
-                if status.get("state") not in TERMINAL_STATES:
-                    _atomic_json(self._status_path(job_id), {
-                        **status,
-                        "state": "FAILED",
-                        "progress_phase": "WORKER_RESTARTED",
-                        "message": "CAD Worker restarted while job was running",
-                        "error_code": "WORKER_RESTARTED",
-                        "updated_at": now_iso(),
-                        "finished_at": now_iso(),
-                    })
-            self.process = self._spawn_worker()
+            current = _load_json(self.spool / "current.json") or {}
+            if current.get("job_id"):
+                self._mark_nonterminal(
+                    current["job_id"],
+                    state="FAILED",
+                    phase="WORKER_RESTARTED",
+                    message="CAD Worker restarted while job was running",
+                    error_code="WORKER_RESTARTED",
+                )
+            self._replace_worker()
+            self._ensure_monitor()
             return self.worker_status()
 
     def shutdown(self) -> None:
         self._stop_monitor.set()
         with self._lock:
             self._terminate_worker()
+            (self.spool / "current.json").unlink(missing_ok=True)
 
     def worker_status(self) -> dict[str, Any]:
         process = self.process
         alive = bool(process is not None and process.poll() is None)
         heartbeat = _load_json(self.spool / "worker-heartbeat.json") or {}
-        current = _load_json(self.spool / "current.json")
+        heartbeat_matches = bool(alive and heartbeat.get("pid") == process.pid)
+        heartbeat_age = None
+        if heartbeat_matches and heartbeat.get("epoch") is not None:
+            heartbeat_age = max(0.0, time.time() - float(heartbeat["epoch"]))
+
+        if not alive:
+            state = "STOPPED"
+        elif not heartbeat_matches:
+            state = "STARTING"
+        elif heartbeat_age is not None and heartbeat_age > HEARTBEAT_STALE_SECONDS:
+            state = "UNRESPONSIVE"
+        else:
+            state = "RUNNING"
+
         return {
-            "state": "RUNNING" if alive else "STOPPED",
+            "state": state,
             "pid": process.pid if alive else None,
-            "heartbeat": heartbeat.get("at"),
-            "current_job": current,
+            "heartbeat": heartbeat.get("at") if heartbeat_matches else None,
+            "heartbeat_age_s": round(heartbeat_age, 3) if heartbeat_age is not None else None,
+            "current_job": _load_json(self.spool / "current.json"),
         }
 
-    def submit(self, kind: str, payload: dict[str, Any] | None = None, *, timeout_s: float = 300.0) -> dict[str, Any]:
+    def submit(
+        self,
+        kind: str,
+        payload: dict[str, Any] | None = None,
+        *,
+        timeout_s: float = 300.0,
+    ) -> dict[str, Any]:
         self.ensure_running()
         job_id = uuid.uuid4().hex[:16]
         created = now_iso()
@@ -255,17 +336,23 @@ class CadWorkerManager:
             "timeout_s": float(timeout_s),
             "deadline_epoch": time.time() + float(timeout_s),
             "worker_pid": None,
+            "completed": 0,
+            "total": None,
+            "current_case_id": None,
             "error_code": None,
             "error_message": None,
         }
         _atomic_json(self._status_path(job_id), status)
-        _atomic_json(self._request_path(job_id), {
-            "job_id": job_id,
-            "kind": kind.upper(),
-            "payload": payload or {},
-            "timeout_s": float(timeout_s),
-            "created_at": created,
-        })
+        _atomic_json(
+            self._request_path(job_id),
+            {
+                "job_id": job_id,
+                "kind": kind.upper(),
+                "payload": payload or {},
+                "timeout_s": float(timeout_s),
+                "created_at": created,
+            },
+        )
         return status
 
     def get_job(self, job_id: str, *, include_result: bool = True) -> dict[str, Any]:
@@ -282,6 +369,7 @@ class CadWorkerManager:
             status = self.get_job(job_id, include_result=False)
             if status.get("state") in TERMINAL_STATES:
                 return status
+
             request = self._request_path(job_id)
             if request.exists():
                 request.unlink(missing_ok=True)
@@ -319,22 +407,21 @@ class CadWorkerManager:
                 with self._lock:
                     process = self.process
                     current = _load_json(self.spool / "current.json") or {}
+
                     if process is not None and process.poll() is not None:
                         self.process = None
                         job_id = current.get("job_id")
                         if job_id:
-                            status = _load_json(self._status_path(job_id), {}) or {}
-                            if status.get("state") not in TERMINAL_STATES:
-                                _atomic_json(self._status_path(job_id), {
-                                    **status,
-                                    "state": "FAILED",
-                                    "progress_phase": "WORKER_CRASHED",
-                                    "message": "CAD Worker unexpectedly exited",
-                                    "error_code": "WORKER_CRASHED",
-                                    "updated_at": now_iso(),
-                                    "finished_at": now_iso(),
-                                })
-                            (self.spool / "current.json").unlink(missing_ok=True)
+                            self._mark_nonterminal(
+                                job_id,
+                                state="FAILED",
+                                phase="WORKER_CRASHED",
+                                message="CAD Worker unexpectedly exited",
+                                error_code="WORKER_CRASHED",
+                            )
+                        (self.spool / "current.json").unlink(missing_ok=True)
+                        if not self._stop_monitor.is_set():
+                            self.process = self._spawn_worker()
                         continue
 
                     job_id = current.get("job_id")
@@ -342,19 +429,29 @@ class CadWorkerManager:
                         continue
                     status = _load_json(self._status_path(job_id), {}) or {}
                     deadline = status.get("deadline_epoch")
-                    if deadline and time.time() > float(deadline) and status.get("state") not in TERMINAL_STATES:
+                    if (
+                        deadline
+                        and time.time() > float(deadline)
+                        and status.get("state") not in TERMINAL_STATES
+                    ):
                         self._terminate_worker()
                         (self.spool / "current.json").unlink(missing_ok=True)
-                        _atomic_json(self._status_path(job_id), {
-                            **status,
-                            "state": "TIMED_OUT",
-                            "progress_phase": "WORKER_RESTARTING",
-                            "message": f"CAD job exceeded {status.get('timeout_s')} seconds",
-                            "error_code": "TIMED_OUT",
-                            "updated_at": now_iso(),
-                            "finished_at": now_iso(),
-                        })
-                        self.process = self._spawn_worker()
+                        _atomic_json(
+                            self._status_path(job_id),
+                            {
+                                **status,
+                                "state": "TIMED_OUT",
+                                "progress_phase": "WORKER_RESTARTING",
+                                "message": f"CAD job exceeded {status.get('timeout_s')} seconds",
+                                "error_code": "TIMED_OUT",
+                                "error_message": f"CAD job exceeded {status.get('timeout_s')} seconds",
+                                "updated_at": now_iso(),
+                                "finished_at": now_iso(),
+                            },
+                        )
+                        if not self._stop_monitor.is_set():
+                            self.process = self._spawn_worker()
             except Exception:
-                # Monitoring must never take down the Runtime Controller.
+                # The monitor is a safety plane; an observability error must not
+                # take the Runtime Controller down.
                 continue
