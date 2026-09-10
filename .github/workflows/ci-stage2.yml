@@ -22,16 +22,25 @@ jobs:
         run: python tools/generate_step_fixture.py
       - name: Readiness must fail closed
         run: python tools/readiness.py
-      - name: Run P0 test suite
+      - name: Run P0 test suite and product-form contract
         run: python -m pytest -q
       - name: Prove controlled 12/8 regression contract
         run: python tools/run_step_demo.py
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Build three-cad-viewer workspace
+      - name: Build Electron Renderer bundle
         run: npm install && npm run build
         working-directory: web
+      - name: Check Electron Main/runtime contract
+        run: npm install && npm run check
+        working-directory: desktop
+      - name: Assert primary launcher is Electron
+        shell: bash
+        run: |
+          grep -q "npm --prefix desktop start" start.sh
+          ! grep -q "uvicorn" start.sh
+          grep -q "NOT PRODUCT" scripts/start-web-dev.sh
       - name: Upload run evidence
         if: always()
         uses: actions/upload-artifact@v4
