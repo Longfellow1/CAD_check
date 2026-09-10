@@ -1,6 +1,30 @@
 # CAD Check MVP 技术方案 V1.1
 
-> V1.1 为 V1.0 增量加固：Electron、Python/OCP、Viewer 可替换等主架构不变，补齐 Canonical AssemblyTree、对象身份、后台 Job、Evidence 可复现信息和硬 Gate。
+> V1.1 为 V1.0 增量加固：Electron、Python/OCP、Viewer 可替换等主架构不变，补齐 Canonical AssemblyTree、对象身份、后台 Job、Evidence 可复现信息和硬 Gate，并把 Electron 产品形态提升为不可违反的技术合同。
+
+## 0. 不可违反的产品形态合同
+
+CAD Check MVP 的**唯一产品入口**是 Electron Desktop App。
+
+- `Electron Main` 是产品进程根节点，负责启动/守护/关闭 Python Runtime。
+- `Electron Renderer` 是唯一用户界面运行环境；`web/` 只是现有 Renderer 源码目录名。
+- FastAPI 只允许作为 Electron 内部 `127.0.0.1` sidecar，不是独立产品服务。
+- Standalone Browser 只允许开发调试；任何仅在浏览器中成立的能力一律 **NOT DONE**。
+- 功能验收、Viewer Gate、工程师手测、Mac/Windows Smoke 必须从 Electron 启动。
+- Electron 启动 sidecar 时必须使用随机 loopback port + session token；用户不管理端口或 URL。
+- `./start.sh` / `start.cmd` 必须直接启动 Electron；Uvicorn standalone 入口只能存在于显式标记为 debug-only 的脚本中。
+
+标准启动拓扑：
+
+```text
+User
+ ↓
+Electron App
+ ├─ Main: app lifecycle / native OS / runtime supervisor
+ ├─ Renderer: CAD Check UX + Viewer
+ └─ Python/OCP Runtime @ random 127.0.0.1 port
+      └─ internal API only
+```
 
 ## 1. 技术目标
 
@@ -8,11 +32,12 @@
 
 核心原则：
 
-- Electron 是产品容器，不是几何内核。
+- Electron 是产品容器和进程根，不是几何内核。
 - Viewer 是可替换组件，不参与工程真值计算，也不拥有装配树真值。
 - Python + OCP/OCCT 是当前确定性 Geometry / Check Runtime。
 - Canonical AssemblyTree / Object Identity 独立于 Viewer Mesh。
 - Verification Case / Evidence / Replay 与具体 CAD、Viewer 解耦。
+- Web 技术可以作为 Renderer 实现，但不得反向定义产品为 Web。
 
 ## 2. 总体架构
 
@@ -23,6 +48,7 @@ CAD Check Desktop
 │  ├─ App 生命周期
 │  ├─ 文件打开/保存
 │  ├─ Runtime Controller 启停
+│  ├─ random localhost port / session token
 │  ├─ Job / Cancel / Restart
 │  ├─ Cache / Log 路径
 │  └─ Crash Recovery
@@ -49,6 +75,18 @@ CAD Check Desktop
       └─ Evidence Geometry
 ```
 
+### 2.1 代码目录语义
+
+当前仓库允许保留：
+
+```text
+desktop/   Electron Main / preload / runtime supervisor
+web/       Electron Renderer source（历史目录名）
+server/    Python Runtime / Verification Core
+```
+
+`web/` 不表示产品拥有 Web 交付形态。若未来重命名为 `renderer/`，只属于工程整理，不改变架构。
+
 ## 3. 进程边界与后台任务
 
 ### Electron Main
@@ -58,9 +96,23 @@ CAD Check Desktop
 - 拉起并守护 Python Runtime Controller。
 - 选择本地 STEP 文件。
 - 管理随机 localhost 端口和 session token。
+- 对内部 Runtime 请求注入 session token。
 - App 退出时关闭 Runtime。
-- Runtime/Worker 崩溃时允许重启，不带崩 Renderer。
+- Runtime/Worker 崩溃时允许从 App 内重启，不带崩 Renderer。
 - 统一 cache、workspace、log 路径。
+
+产品启动顺序必须是：
+
+```text
+Electron Main
+→ reserve random port
+→ generate session token
+→ spawn Python Runtime
+→ /api/health READY
+→ create/show product BrowserWindow
+```
+
+不能要求用户先手工启动 Python 再打开 Electron。
 
 ### Electron Renderer
 
@@ -70,10 +122,17 @@ CAD Check Desktop
 - 不直接做工程真值测量。
 - 接收 Canonical AssemblyTree 与 Viewer Derivative / Viewer Runtime 数据。
 - 调用 Check / Evidence / Replay API。
+- 不展示 localhost 地址、端口管理等 Web 产品概念。
 
 ### Python Runtime Controller
 
-MVP 继续复用 FastAPI，监听 `127.0.0.1`，通过 localhost HTTP + session token 与 Electron 通信。
+MVP 继续复用 FastAPI，监听 `127.0.0.1`，通过 localhost HTTP 与 Electron 通信。
+
+当由 Electron 启动时：
+
+- API 必须校验当前 Electron session token。
+- sidecar URL 不作为支持的用户入口。
+- Renderer/API 开发可通过无 token 的 Standalone Browser debug mode 启动，但该模式不计入任何产品 Gate。
 
 Controller 必须与重型 CAD Worker 分离，保证即使某个 OCCT 任务长时间运行，以下接口仍可响应：
 
@@ -238,6 +297,7 @@ Regression 状态：
 - 不采用 FreeCAD / Obsidian 作为宿主。
 - Viewer 必须可嵌入 Electron，消费 Canonical AssemblyTree/Object Identity，支持 Picking / Visibility / Highlight，并允许叠加 Evidence。
 - 冻结的是 Viewer Interface / Architecture，不是永久冻结某个开源项目；候选不达 Gate 可替换，但 Verification Core 不变。
+- Viewer benchmark 可以在浏览器中做低层调试，但 Gate 结论必须在 Electron Renderer 中复测后才有效。
 
 ### Candidate A：NARU Runtime
 
@@ -268,7 +328,7 @@ disposeDetail()
 
 同一模型至少验证：
 
-1. Time To Overview / 首批几何出现时间。
+1. Electron 内 Time To Overview / 首批几何出现时间。
 2. 峰值与常驻内存。
 3. 加载时旋转/缩放不假死。
 4. Canonical Tree 层级可完整展示，不依赖 Mesh 是否已加载。
@@ -276,7 +336,7 @@ disposeDetail()
 6. 500+ occurrence Hide/Isolate 稳定，不因批量更新出现整场景空白/消失。
 7. FAIL → Evidence 局部 Detail/Highlight 可叠加。
 8. 连续切换多个 Case 不出现明显泄漏或场景失效。
-9. Windows x64 可运行。
+9. Windows x64 Electron 可运行。
 
 564 个叶件全部 Detail 是否最终加载完成作为 benchmark 记录项，不作为 MVP 生死 Gate。
 
@@ -296,7 +356,7 @@ Python/OCP Native
    ├─ Canonical AssemblyTree / Identity
    └─ Viewer Derivative / Compiled Scene
             ↓ occurrence_id mapping
-        Electron Viewer
+        Electron Renderer / Viewer
 ```
 
 Viewer 的交互测量可以存在，但只作为辅助；最终工程数值由 OCP Executor 返回。
@@ -317,7 +377,7 @@ Evidence：局部高精度
 - Evidence 局部 Edge ON。
 - Renderer 设置 resident geometry budget。
 - 不需要的 Detail 可卸载。
-- 首次生成允许慢，但不能阻塞 UI；Warm Open 优先缓存。
+- 首次生成允许慢，但不能阻塞 Electron UI；Warm Open 优先缓存。
 
 ## 10. Evidence 数据契约
 
@@ -376,11 +436,12 @@ Regression 的可比键至少包含 Case/Rule/Executor/Measurement Method/单位
 
 MVP：
 
-- Electron 负责桌面包。
-- Python Runtime 后期可用 PyInstaller/Nuitka 等打包为 sidecar executable。
+- Electron 负责唯一桌面产品壳和主入口。
+- Python Runtime 后期可用 PyInstaller/Nuitka 等打包为 sidecar executable；当前开发期可由 Electron Main 启动 `.venv` Python。
 - macOS arm64 在 Mac 构建。
 - Windows x64 在 Windows 构建。
 - 当前不做签名、notarization、auto-update。
+- Standalone Browser 不作为任何平台交付物。
 
 Windows Smoke 必须在 Week 1 完成，不等 Week 3。Smoke 可复用现有最小 Evidence JSON/PNG，不要求在 Week 1 提前完成 Week 2 的完整 Evidence Contract：
 
@@ -408,6 +469,7 @@ CATIA
 
 ## 13. 当前禁止投入
 
+- 独立 Web 产品化或浏览器交付。
 - 继续扩建自研 Web streaming protocol。
 - 自研通用 CAD Viewer。
 - Electron IPC 全量重写。
@@ -420,13 +482,15 @@ CATIA
 
 技术方案通过条件：
 
-1. Electron 在 Mac 与 Windows x64 启动。
-2. Windows Week 1 Smoke 全链路通过。
-3. Runtime Controller 在 CAD Worker 重任务期间保持 Health/Heartbeat/Job API 响应。
-4. Job 支持成功、失败、取消、超时与 Worker Restart。
-5. Canonical AssemblyTree 独立于 Viewer Mesh，并通过 Scania 层级回归。
-6. Viewer Pick / Visibility / Evidence 均以 occurrence ID 对齐。
-7. Minimum Clearance / Directional Distance / Angle 各有至少 1 个可信 Golden Case。
-8. FAIL 能自动定位并叠加 Evidence。
-9. Scania 级模型完成 Overview / Pick / Hide/Isolate / 固定 occurrence pair Evidence 叠加时应用不崩溃；该项仅验证规模链路，不作为 FORMAL Check。
-10. Viewer 可替换而不改 Verification Core / Evidence Contract。
+1. 唯一产品入口为 Electron；主启动脚本不得直接启动浏览器产品。
+2. Electron 在 Mac 与 Windows x64 启动。
+3. Windows Week 1 Smoke 全链路通过。
+4. Runtime Controller 在 CAD Worker 重任务期间保持 Health/Heartbeat/Job API 响应。
+5. Job 支持成功、失败、取消、超时与 Worker Restart。
+6. Canonical AssemblyTree 独立于 Viewer Mesh，并通过 Scania 层级回归。
+7. Viewer Pick / Visibility / Evidence 均以 occurrence ID 对齐。
+8. Minimum Clearance / Directional Distance / Angle 各有至少 1 个可信 Golden Case。
+9. FAIL 能自动定位并叠加 Evidence。
+10. Scania 级模型完成 Overview / Pick / Hide/Isolate / 固定 occurrence pair Evidence 叠加时 Electron App 不崩溃；该项仅验证规模链路，不作为 FORMAL Check。
+11. Viewer 可替换而不改 Verification Core / Evidence Contract。
+12. 浏览器调试通过不能替代任何一项 Electron Gate；否则仍为 NOT DONE。
