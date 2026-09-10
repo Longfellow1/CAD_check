@@ -1,70 +1,64 @@
-# CAD Check — Stage-2 STEP / OCCT Capability MVP
+# CAD Check
 
-当前分支：`mvp-v0.2-step-occt`
+Automotive Engineering Verification MVP for STEP / AP242 + OCCT.
 
-本阶段把 v0.1 的 Primitive Demo 推到真实 STEP/OCCT 实验链：
+## 当前开发分支
 
-```text
-STEP
-→ STEPCAFControl_Reader / XCAF
-→ Assembly / Occurrence Inventory
-→ Model Readiness
-→ Manual Exact-path Binding
-→ VerificationCase
-→ OCP/OCCT B-Rep Executor
-→ V1/V2 Regression
-→ Evidence + trace.jsonl
-→ ocp-tessellate
-→ three-cad-viewer
-```
+- `main`：稳定基线
+- `dev`：唯一开发分支
 
-## 一键启动
-
-要求 Python 3.11、Node.js 20+：
+## 本地启动
 
 ```bash
 ./scripts/bootstrap.sh
 ./start.sh
 ```
 
-浏览器打开 `http://127.0.0.1:8000`。
+`start.sh` 当前使用 `server.app_v2:app`，在既有工程校验 API 上叠加大型模型 Web Streaming / View Derivative 能力。
 
-`bootstrap.sh` 使用 `pip --isolated`，避免本机 `global.user=true` 等 pip 用户配置污染。
+浏览器打开：
 
-## 核心命令
-
-```bash
-python tools/generate_step_fixture.py   # 生成 V1/V2 XCAF STEP
-python tools/readiness.py               # STEP / BRep / Binding / pair readiness
-python tools/run_step_demo.py           # 真实 OCP 回归
-python tools/register_model.py model.step --model-id public_vehicle --version V1
-pytest -q tests/test_stage2_step.py
+```text
+http://127.0.0.1:8000
 ```
 
-## 当前已经进入代码的能力
+## 当前 MVP 能力
 
-- `STEPCAFControl_Reader` + XCAF Assembly/Occurrence tree；
-- STEP schema / source unit / BRep validity / empty shape / duplicate bbox / coordinate contract Readiness；
-- 人工 exact occurrence-path Binding；
-- `BRepExtrema_DistShapeShape` Minimum Clearance + 最近点；
-- Directional Distance（当前明确标记为 `bbox_axis_extrema` 近似）；
-- XCAF occurrence transform 的 Angle / Orientation；
-- 18 条现有 VerificationCase 对真实重新导入 STEP 执行；
-- V1/V2 Regression；
-- `result.json`、`trace.jsonl`、Evidence PNG 落盘；
-- `ocp-tessellate` → `three-cad-viewer` WebGL Viewer；
-- CI 中安装 OCP、生成 STEP、重新导入、执行测试和构建 Web。
+- STEP / AP242 → STEPCAF / XCAF
+- Assembly / Occurrence Inventory
+- 人工 exact-path Binding
+- OCCT 三类基础执行器
+- V1 / V2 Regression
+- Evidence / Trace
+- three-cad-viewer WebGL
+- 大模型 View Derivative：Manifest + Chunk + LOD Preview + Disk Cache
+- 前端真实 Part/Chunk 加载进度
+- 低频能力折叠到“更多”
 
-## Controlled Fixture 的意义
+## 大模型 Web 加载
 
-Controlled Fixture 不是绕过 STEP：几何先由 OCP/XCAF 写出 STEP，然后应用再次通过 STEPCAF/XCAF Reader 导入，所有 Check 都对重新导入的 TopoDS Shape 执行。因此它可以验证 STEP Boundary、OCP Geometry、Binding、Regression、Evidence 的代码闭环。
+Scania 等大模型不再走整车单体 Viewer JSON。当前 Web 默认链路：
 
-## 仍然不宣称
+```text
+STEP/XCAF/BRep
+  ├─ Engineering Truth → Geometry Check
+  └─ View Derivative → Manifest → Chunk Cache → Progressive Web Viewer
+```
 
-- CATIA → AP242 企业保真度已验证；
-- 真实车型 Binding Reuse Rate 已验证；
-- Directional Distance 当前近似等于企业正式测量方法；
-- Headroom / Visibility / Dynamic DMU 已支持；
-- 当前结果可用于量产工程签核。
+详细设计见：`docs/LARGE_MODEL_WEB_LOADING.md`。
 
-这些仍然属于真实企业数据 Pilot 要回答的问题。
+## 测试
+
+```bash
+python -m pytest -q
+cd web && npm run build
+```
+
+当前阶段重点验证：
+
+1. STEP/XCAF 真实读取；
+2. OCCT 几何执行；
+3. Regression；
+4. 大模型不再构造 1.56GB 单体 Viewer JSON；
+5. Chunk 渐进加载、缓存和真实进度；
+6. Evidence / Trace 可复核。
