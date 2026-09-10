@@ -13,15 +13,27 @@ workflow_id: GEOMETRY_CHECK_V1
 required_bindings:
   - battery
   - ground_ref
+applicable_versions: [V1, V2]
 rule:
   authority: FORMAL
   operator: ">="
   threshold: 130.0
   unit: mm
+  tolerance: 0.001
 regression_epsilon: 0.1
 evidence:
   highlight_ab: true
   measurement_line: true
   measurement_value: true
   screenshot: true
-note: "方向距离当前使用受控 Fixture 的 B-Rep 包围盒极值近似。"
+ground_truth:
+  fixture: controlled_vehicle
+  truth_source: "fixtures/controlled/controlled-fixture-spec.yaml#CF-DIR-001"
+  method: "BRep bounding extrema projected on vehicle Z axis"
+  coordinate_system: X-forward/Y-left/Z-up
+  unit: mm
+  tolerance: 0.001
+  expected:
+    V1: {value: 160.0, status: PASS}
+    V2: {value: 156.0, status: PASS}
+note: "Golden 明确定义为受控 Fixture 的 Z 向 B-Rep bbox extrema 方法；不外推为任意工程方向距离方法。"
