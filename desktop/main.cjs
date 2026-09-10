@@ -42,7 +42,6 @@ function createWindow(url) {
   });
 
   installRuntimeRequestGuard(mainWindow);
-
   mainWindow.once('ready-to-show', () => mainWindow?.show());
   mainWindow.on('closed', () => { mainWindow = null; });
   mainWindow.webContents.setWindowOpenHandler(({ url: target }) => {
@@ -55,9 +54,7 @@ function createWindow(url) {
   });
   mainWindow.loadURL(url);
 
-  if (OPEN_DEVTOOLS) {
-    mainWindow.webContents.openDevTools({ mode: 'detach' });
-  }
+  if (OPEN_DEVTOOLS) mainWindow.webContents.openDevTools({ mode: 'detach' });
 }
 
 async function boot() {
@@ -78,10 +75,21 @@ async function boot() {
 ipcMain.handle('runtime:status', () => runtime.status());
 ipcMain.handle('runtime:restart', async () => {
   const status = await runtime.restart();
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    await mainWindow.loadURL(status.url);
-  }
+  if (mainWindow && !mainWindow.isDestroyed()) await mainWindow.loadURL(status.url);
   return status;
+});
+ipcMain.handle('file:open-step', async () => {
+  const owner = mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
+  const result = await dialog.showOpenDialog(owner, {
+    title: '打开 STEP / AP242 模型',
+    properties: ['openFile'],
+    filters: [
+      { name: 'STEP / AP242', extensions: ['step', 'stp'] },
+      { name: 'All Files', extensions: ['*'] },
+    ],
+  });
+  if (result.canceled || !result.filePaths.length) return null;
+  return result.filePaths[0];
 });
 
 runtime.on('state', (status) => {
@@ -90,7 +98,6 @@ runtime.on('state', (status) => {
 });
 
 app.whenReady().then(boot);
-
 app.on('activate', async () => {
   if (BrowserWindow.getAllWindows().length > 0) return;
   try {
@@ -105,11 +112,9 @@ app.on('activate', async () => {
     });
   }
 });
-
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
-
 app.on('before-quit', (event) => {
   if (quitting || runtime.state === 'STOPPED') return;
   event.preventDefault();
