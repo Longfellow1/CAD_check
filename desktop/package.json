@@ -6,13 +6,13 @@
   "main": "main.cjs",
   "scripts": {
     "start": "electron .",
-    "dev": "CAD_CHECK_DEVTOOLS=1 electron .",
+    "dev": "electron . --devtools",
     "check": "node --check main.cjs && node --check runtime.cjs && node --check preload.cjs && node --test runtime.test.cjs"
   },
   "engines": {
     "node": ">=20"
   },
   "devDependencies": {
-    "electron": "^37.4.0"
+    "electron": "37.4.0"
   }
 }
