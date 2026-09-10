@@ -4,6 +4,7 @@ const { RuntimeManager } = require('./runtime.cjs');
 
 const ROOT = path.resolve(__dirname, '..');
 const runtime = new RuntimeManager(ROOT);
+const OPEN_DEVTOOLS = process.argv.includes('--devtools') || process.env.CAD_CHECK_DEVTOOLS === '1';
 let mainWindow = null;
 let quitting = false;
 
@@ -29,7 +30,7 @@ function createWindow(url) {
   mainWindow.on('closed', () => { mainWindow = null; });
   mainWindow.loadURL(url);
 
-  if (process.env.CAD_CHECK_DEVTOOLS === '1') {
+  if (OPEN_DEVTOOLS) {
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   }
 }
