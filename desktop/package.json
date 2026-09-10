@@ -1,12 +1,13 @@
 {
   "name": "cad-check-desktop",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Electron shell for CAD Check engineering verification MVP",
   "main": "main.cjs",
   "scripts": {
     "start": "electron .",
     "dev": "electron . --devtools",
+    "e2e": "electron . --e2e",
     "check": "node --check main.cjs && node --check runtime.cjs && node --check preload.cjs && node --test runtime.test.cjs"
   },
   "engines": {
