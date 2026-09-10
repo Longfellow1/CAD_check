@@ -1,12 +1,36 @@
 # CAD Check MVP 项目排期 V1.1
 
-> V1.1 为 V1.0 增量加固：总体 3–4 周节奏不变，只把 Windows Smoke、Canonical AssemblyTree、后台 Job 和 Golden Gate 前置为硬验收。
+> V1.1 为 V1.0 增量加固：总体 3–4 周节奏不变，只把 Windows Smoke、Canonical AssemblyTree、后台 Job 和 Golden Gate 前置为硬验收，并把 Electron 产品形态收紧为不可违反的项目合同。
+
+## 0. 不可违反的产品形态合同 / Definition of Done
+
+CAD Check MVP 的**唯一产品入口**是 Electron Desktop App。
+
+任何开发任务只有同时满足以下条件才允许标记 Done：
+
+```text
+代码完成
++ 自动测试通过
++ Electron 内可操作
++ 不要求用户手动启动 Uvicorn / 打开 localhost
++ Electron Main 正确管理 Runtime 生命周期
++ 对应 Gate 证据来自 Electron
+= DONE
+```
+
+否则一律 **NOT DONE**。
+
+- Standalone Browser 仅允许开发调试 Renderer/API。
+- 浏览器截图、浏览器 Demo、浏览器性能数据不能替代 Electron 的产品验收。
+- `web/` 是 Renderer 源码目录，不是项目的第二产品形态。
+- `./start.sh` / `start.cmd` 必须直接启动 Electron 产品。
+- 如果某项在 Web debug 通过而 Electron 未通过，排期状态仍为未完成。
 
 ## 1. 项目目标
 
 用 3–4 周完成一个可在 macOS / Windows x64 运行的 Electron MVP，验证：
 
-`STEP → 自动检测 → 自动定位/标注 → Evidence → Replay → V1/V2 Regression`
+`Electron → STEP → 自动检测 → 自动定位/标注 → Evidence → Replay → V1/V2 Regression`
 
 排期原则：
 
@@ -15,11 +39,12 @@
 - 先证明工程真值，再扩大到 15–25 条 Coverage Case。
 - Scania 只承担复杂模型规模/稳定性 Gate，不作为规则真值。
 - 不把生产级 Viewer、CATIA、企业基建带入 MVP。
+- 所有 Milestone 的退出条件均以 Electron 产品形态为准。
 
 ## 2. 总体节奏
 
 ```text
-D0–D2   Viewer Bake-off + Electron/Windows Smoke
+D0–D2   Electron Skeleton + Viewer Bake-off + Windows Smoke
 W1      Desktop Shell + Canonical Tree/Identity + Runtime Job
 W2      3 Executor Golden + Auto Annotation + Evidence
 W3      Replay + Regression + 15–25 Case Coverage + 双平台完整闭环
@@ -32,10 +57,11 @@ W4      Scania/真实工程案例收口与 Buffer（如需要）
 
 ### 目标
 
-关闭 NARU vs cad-3d-viewer 首轮选型，不开发业务功能。
+在 **Electron Renderer** 内关闭 NARU vs cad-3d-viewer 首轮选型，不开发业务功能。
 
 ### 输入
 
+- Electron Desktop Skeleton。
 - 小型 Controlled STEP。
 - Scania 约 295MB STEP。
 - 从 Scania XCAF 基线导出的固定 Canonical Tree/occurrence 映射 Fixture，避免 Gate 依赖 Week 1 完整实现。
@@ -53,7 +79,9 @@ W4      Scania/真实工程案例收口与 Buffer（如需要）
 - 500+ occurrence Hide / Isolate。
 - FAIL Evidence Highlight/Detail 可扩展性。
 - 连续切换多个对象/Case 不出现整场景空白或失效。
-- Windows x64 可运行性。
+- Windows x64 Electron 可运行性。
+
+Standalone Browser benchmark 可以辅助定位 Viewer 自身问题，但不能作为 Gate 0 最终证据。
 
 ### Scania 树回归基线
 
@@ -75,8 +103,8 @@ W4      Scania/真实工程案例收口与 Buffer（如需要）
 
 ### Exit Criteria
 
-- 保留一个主 Viewer 实现。
-- 输出 benchmark 结果。
+- Electron 内保留一个主 Viewer 实现。
+- 输出 Electron benchmark 结果。
 - Viewer 最小接口冻结。
 - 不再扩建自研通用 Viewer 基建。
 
@@ -84,7 +112,7 @@ W4      Scania/真实工程案例收口与 Buffer（如需要）
 
 Week 1 不结束前必须在 Windows x64 跑通：
 
-`Electron 启动 → Python Runtime 启动 → 小 STEP → Minimum Clearance → 最小 Evidence JSON/PNG → Worker/Runtime Restart → 正常退出`
+`Electron 启动 → Electron Main 拉起 Python Runtime → 小 STEP → Minimum Clearance → 最小 Evidence JSON/PNG → Worker/Runtime Restart → 正常退出`
 
 这里复用现有最小 Evidence 能力验证 Windows 链路，不要求提前完成 Week 2 的完整 Evidence Contract。
 
@@ -95,8 +123,9 @@ Week 1 不结束前必须在 Windows x64 跑通：
 - 临时目录/缓存目录。
 - 中文路径与基础长路径。
 - GPU / WebGL 或 WebGPU 基础启动。
+- Electron 退出后 sidecar 不残留。
 
-若此 Gate 不通过，M1 不允许标记完成。
+若此 Gate 不通过，M1 不允许标记完成。浏览器 + Python 跑通不算 Windows Smoke。
 
 ## 5. Week 1：桌面、数据骨架与 Runtime
 
@@ -107,10 +136,13 @@ Week 1 不结束前必须在 Windows x64 跑通：
 ### Electron
 
 - Main / Renderer 基础工程。
+- Electron 是唯一主入口。
 - 本地文件选择。
-- Runtime Controller 启停。
+- Runtime Controller 自动启停。
 - localhost 随机端口 + session token。
 - Runtime health / heartbeat / restart。
+- 退出 Electron 时清理 sidecar。
+- Standalone Web 移到 debug-only 脚本，不出现在产品启动说明中。
 
 ### Canonical AssemblyTree / Identity
 
@@ -144,6 +176,7 @@ Windows：必须通过 Gate 0B Smoke。
 - Runtime Controller 在 Worker 忙时仍可响应。
 - Worker 可失败/取消/重启。
 - Tree 不依赖 Mesh 是否已加载。
+- 用户正常路径不出现“打开浏览器/访问 localhost/手工启动 Python”。
 
 ## 6. Week 2：Golden Check + Auto Annotation + Evidence
 
@@ -177,16 +210,19 @@ Windows：必须通过 Gate 0B Smoke。
 
 ### Auto Focus / Annotation
 
-FAIL 自动：
+FAIL 默认自动：
 
 - occurrence ID 定位。
-- isolate / context 弱化。
-- highlight。
+- Target/Counterpart 高亮。
+- Context 半透明弱化，默认不直接 isolate。
 - Frame Camera。
 - closest-points / distance / direction / angle marker。
 - value / threshold / margin。
+- 用户可主动 `隔离`。
 
 ### Evidence
+
+FAIL / REVIEW_REQUIRED 自动准备 Evidence，不把“截图/选对象”重新交给用户。
 
 Evidence 至少保存：
 
@@ -205,7 +241,7 @@ Evidence 至少保存：
 - FORMAL FAIL 一键进入 Evidence。
 - Evidence 不需要人工重新选择对象才能复核。
 - 保存后可完整重建关键工程上下文。
-- 至少 1 名目标工程师无需开发者代操作完成 FAIL → Evidence → 保存，并记录是否需要返回 CATIA 重新测量。
+- 至少 1 名目标工程师从 Electron App、无需开发者代操作完成 FAIL → Evidence → 固化，并记录是否需要返回 CATIA 重新测量。
 
 ## 7. Week 3：Replay / Regression / Coverage / 双平台
 
@@ -223,9 +259,11 @@ Evidence 至少保存：
 
 ### Regression
 
+MVP 使用单 Viewer，不做双 Viewer 同屏。
+
 - V1 / V2 同一 FORMAL Check Set。
 - NEW_FAIL / FIXED / IMPROVED / REGRESSED / UNCHANGED / NON_COMPARABLE。
-- V1/V2 Evidence 切换。
+- 单 Viewer 中 V1/V2 Evidence 一键切换。
 - Delta 展示。
 - Case/Rule/Executor/Measurement Method/单位/坐标系或 semantic binding 不兼容时输出 NON_COMPARABLE，禁止按名称强行比较。
 
@@ -242,14 +280,14 @@ Evidence 至少保存：
 
 同一 Controlled V1/V2：
 
-`打开 → Run → FAIL → Evidence → Replay → Regression`
+`Electron 打开 → Run → FAIL → Evidence → Replay → Regression`
 
 ### Week 3 验收 / M3
 
 - Replay 可恢复工程状态。
 - Regression 结果稳定。
 - Coverage Matrix 完整。
-- Mac / Windows 同一闭环均通过。
+- Mac / Windows 同一 Electron 闭环均通过。
 
 ## 8. Week 4：Scania / 真实工程案例收口 Buffer
 
@@ -257,7 +295,7 @@ Evidence 至少保存：
 
 重点：
 
-- Scania Overview / Pick / Hide-Isolate / 固定 occurrence pair Evidence 叠加稳定性；只验规模链路，不宣称 FORMAL 工程结论。
+- Scania 在 Electron 内完成 Overview / Pick / Hide-Isolate / 固定 occurrence pair Evidence 叠加稳定性；只验规模链路，不宣称 FORMAL 工程结论。
 - Warm Open / Cache。
 - 连续 Case 切换内存泄漏。
 - 无效 B-Rep 降级。
@@ -271,10 +309,10 @@ Evidence 至少保存：
 
 | Milestone | 时间 | 通过标准 |
 |---|---|---|
-| M0 Viewer Architecture Freeze | D1–D2 | Viewer 主实现 + 接口冻结；Scania Gate 有记录 |
-| M1 Desktop/Runtime Loop | W1 | Canonical Tree + Job Runtime + Mac Loop + Windows Smoke |
-| M2 Trusted Verification Loop | W2 | 3 Golden + Auto Annotation + Evidence |
-| M3 Engineering Loop | W3 | Replay + Regression + Coverage + 双平台完整闭环 |
+| M0 Viewer Architecture Freeze | D1–D2 | Electron 内 Viewer 主实现 + 接口冻结；Scania Gate 有记录 |
+| M1 Desktop/Runtime Loop | W1 | Canonical Tree + Job Runtime + Mac Electron Loop + Windows Electron Smoke |
+| M2 Trusted Verification Loop | W2 | 3 Golden + Auto Annotation + Auto Evidence，Electron 内完成 |
+| M3 Engineering Loop | W3 | Replay + Regression + Coverage + 双平台 Electron 完整闭环 |
 | M4 MVP Review | W3/W4 | G1–G4 全部通过 + GO/PIVOT/STOP |
 
 ## 10. 四级 MVP Gate
@@ -283,22 +321,24 @@ Evidence 至少保存：
 3 Executor 各至少 1 个可信 FORMAL Golden。
 
 ### G2 产品闭环
-`FAIL → 自动定位 → Evidence → 保存 → Replay`。
+`Electron → FAIL → 自动定位 → Evidence → 固化 → Replay`。
 
 ### G3 工程规模
-Scania 完成 Overview / Pick / 500+ occurrence 显隐 / Evidence 定位，不崩溃、不整场景丢失。
+Scania 在 Electron 内完成 Overview / Pick / 500+ occurrence 显隐 / Evidence 定位，不崩溃、不整场景丢失。
 
 ### G4 可交付性
-Mac + Windows 同一最小闭环通过，Runtime/Worker 可取消、失败恢复、重启与正常退出。
+Mac + Windows 同一 Electron 最小闭环通过，Runtime/Worker 可取消、失败恢复、重启与正常退出。
 
 四项都通过，MVP 即视为成功；15–25 Case 是复用覆盖证据，不是最前置生死 Gate。
 
+Standalone Browser 不参与 G1–G4 产品判定。
+
 ## 11. P0 优先级
 
-1. Electron Desktop。
+1. Electron Desktop 主入口与生命周期。
 2. Canonical AssemblyTree / Object Identity。
 3. Runtime Controller + CAD Worker Job。
-4. Windows Smoke。
+4. Windows Electron Smoke。
 5. Viewer 基础浏览与对象定位。
 6. 3 Executor Golden。
 7. Auto Annotation。
@@ -331,7 +371,7 @@ Canonical Tree 独立于 Mesh；Scania 644/80/564/depth5 纳入回归项。
 Controller 与 CAD Worker Process 分离；Job/Cancel/Heartbeat/Timeout/Restart 为 W1 P0。
 
 ### R4 macOS 通过但 Windows 失败
-Windows Smoke 成为 W1/M1 硬 Exit Criteria；W3 再做完整闭环。
+Windows Electron Smoke 成为 W1/M1 硬 Exit Criteria；W3 再做完整闭环。
 
 ### R5 15–25 Case 变成定制代码
 Coverage Matrix 必填 Executor/Binding/输入/阈值/Evidence，按 Executor 复用率评审。
@@ -342,6 +382,9 @@ Evidence 同时保存模型、规则、绑定、算法版本、工程数值、Vi
 ### R7 Scope 再膨胀
 任何新增需求必须直接提升自动检测 / 标注 / Evidence / Replay / Regression 的验证，否则进入 P1。
 
+### R8 产品形态回退为 Web
+由四份核心文档、README、主启动脚本和自动测试共同锁死：Web 仅为 Renderer/debug 技术。若开发结果只能通过浏览器验证，一律 NOT DONE。
+
 ## 14. 最终评审
 
 MVP Review 只回答：
@@ -350,7 +393,7 @@ MVP Review 只回答：
 2. FAIL 是否能自动定位并形成可复核 Evidence。
 3. Replay / Regression 是否减少版本复查成本。
 4. Scania 级复杂模型是否证明架构边界成立。
-5. Mac / Windows 是否具备最小可交付性。
+5. Mac / Windows Electron 是否具备最小可交付性。
 6. 3 Executor 是否能覆盖一批 Case，而非逐条定制。
 7. Engineering Owner 是否愿意提供真实车型数据进入 Pilot。
 
