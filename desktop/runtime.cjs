@@ -36,7 +36,10 @@ function reservePort(host = '127.0.0.1') {
 
 function healthOnce(url, token = null, timeoutMs = 1000) {
   return new Promise((resolve, reject) => {
-    const headers = token ? { 'X-CAD-Check-Session': token } : {};
+    const headers = token ? {
+      'X-CAD-Check-Session': token,
+      'X-CAD-Check-Product-Form': 'electron',
+    } : {};
     const request = http.get(url, { timeout: timeoutMs, headers }, (response) => {
       response.resume();
       if (response.statusCode === 200) resolve(true);
