@@ -121,11 +121,34 @@ class CheckCard(BaseModel):
 
 
 class Evidence(BaseModel):
+    """Auditable engineering evidence plus reconstructable view state.
+
+    Geometry truth is still the CheckExecution value produced by OCP/OCCT.  The
+    fields below make that result reproducible and allow the Electron Viewer to
+    restore context without guessing by object name.
+    """
+
     focus_ids: list[str]
+    focus_occurrence_ids: list[str] = Field(default_factory=list)
+    focus_paths: list[str] = Field(default_factory=list)
     line_start: tuple[float, float, float] | None = None
     line_end: tuple[float, float, float] | None = None
     camera_preset: str = "iso"
     annotation: str = ""
+
+    model_sha: str | None = None
+    import_schema_version: str | None = None
+    rule_version: str | None = None
+    executor_version: str | None = None
+    measurement_method: str | None = None
+    executor_params: dict[str, Any] = Field(default_factory=dict)
+    binding_snapshot: dict[str, Any] = Field(default_factory=dict)
+    coordinate_system: dict[str, Any] = Field(default_factory=dict)
+    source_unit: str | None = None
+    tolerance: float | None = None
+    threshold: float | None = None
+    view_state: dict[str, Any] = Field(default_factory=dict)
+    screenshot: str | None = None
 
 
 class TraceStep(BaseModel):
@@ -158,3 +181,4 @@ class RegressionResult(BaseModel):
     candidate: CheckExecution
     regression: RegressionStatus
     delta: float | None = None
+    non_comparable_reason: str | None = None
