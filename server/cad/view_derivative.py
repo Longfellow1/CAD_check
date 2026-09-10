@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from hashlib import sha256
 from pathlib import Path
 from typing import Any, Iterable
 import gzip
@@ -10,10 +9,14 @@ import math
 import os
 import time
 
+from .assembly_tree import occurrence_index
+from .source_identity import source_sha256
 from .step_reader import Occurrence, StepModel
 from .tessellation import _expand_shape_refs, _json_safe, _normalize_viewer_tree
 
-DERIVATIVE_SCHEMA_VERSION = "1"
+# v2 adds source_path/occurrence_id to every renderable leaf and intentionally
+# invalidates the old three-cad-viewer-era cache.
+DERIVATIVE_SCHEMA_VERSION = "2"
 
 
 @dataclass(frozen=True)
@@ -73,39 +76,12 @@ def _parent_path(path: str) -> str:
     return parent or "/"
 
 
-def _model_sha(model: StepModel, cache_root: Path) -> str:
-    """Content identity with a tiny stat-index so repeated opens do not re-hash huge STEP files."""
-    path = model.path.resolve()
-    stat = path.stat()
-    cache_root.mkdir(parents=True, exist_ok=True)
-    index_path = cache_root / "source-index.json"
-    try:
-        index = json.loads(index_path.read_text(encoding="utf-8"))
-    except Exception:
-        index = {}
-    key = str(path)
-    cached = index.get(key)
-    if cached and cached.get("size") == stat.st_size and cached.get("mtime_ns") == stat.st_mtime_ns:
-        return str(cached["sha256"])
-
-    digest = sha256()
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(8 * 1024 * 1024), b""):
-            digest.update(block)
-    value = digest.hexdigest()
-    index[key] = {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns, "sha256": value}
-    tmp = index_path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.replace(tmp, index_path)
-    return value
-
-
 def _chunk_groups(model: StepModel, *, max_parts: int = 4) -> list[list[Occurrence]]:
     """Assembly-first chunking with a strict leaf-count ceiling.
 
-    Parent groups stay together when small. Oversized parents are split into stable batches.
-    The first-pass budget is intentionally conservative because a single automotive leaf can
-    still be geometrically heavy even when leaf_count is small.
+    This remains a cache/build unit only.  The Electron viewer no longer loads
+    every chunk; it uses Canonical AssemblyTree bbox proxies for whole-vehicle
+    overview and requests detail on demand.
     """
     grouped: dict[str, list[Occurrence]] = {}
     for occurrence in model.leaf_occurrences:
@@ -117,7 +93,6 @@ def _chunk_groups(model: StepModel, *, max_parts: int = 4) -> list[list[Occurren
         for offset in range(0, len(items), max_parts):
             chunks.append(items[offset : offset + max_parts])
 
-    # Put visually representative / large-bbox chunks first so time-to-first-geometry is useful.
     chunks.sort(key=lambda group: _bbox_diagonal(_bbox_union(group)), reverse=True)
     return chunks
 
@@ -129,8 +104,44 @@ def _profile(name: str) -> TessellationProfile:
         raise ValueError(f"unknown tessellation profile: {name}") from exc
 
 
+def _leaf_parts(node: dict[str, Any]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for part in node.get("parts", []) or []:
+        if isinstance(part, dict) and part.get("parts"):
+            result.extend(_leaf_parts(part))
+        elif isinstance(part, dict):
+            result.append(part)
+    return result
+
+
+def _attach_occurrence_identity(
+    shapes: dict[str, Any],
+    model: StepModel,
+    paths: list[str],
+) -> None:
+    """Attach authoritative occurrence identity to renderable leaves.
+
+    ocp-tessellate owns only geometry serialization.  The authoritative object
+    identity comes from the XCAF canonical tree and is copied onto the derived
+    render payload so picking can return occurrence_id directly.
+    """
+    leaves = _leaf_parts(shapes)
+    if len(leaves) != len(paths):
+        raise ValueError(
+            f"viewer derivative leaf mismatch: geometry={len(leaves)} paths={len(paths)}"
+        )
+    identities = occurrence_index(model)
+    for leaf, source_path in zip(leaves, paths, strict=True):
+        identity = identities.get(source_path)
+        if identity is None:
+            raise ValueError(f"missing canonical identity for {source_path}")
+        leaf["source_path"] = source_path
+        leaf["occurrence_id"] = identity["occurrence_id"]
+        leaf["prototype_ref"] = source_path
+
+
 class ViewDerivativeStore:
-    """Web-view derivative layer; deliberately separate from engineering BRep truth."""
+    """Viewer derivative cache, deliberately separate from engineering BRep truth."""
 
     def __init__(self, root: str | Path):
         self.root = Path(root).resolve()
@@ -146,22 +157,25 @@ class ViewDerivativeStore:
             return cached
 
         started = time.perf_counter()
-        source_sha = _model_sha(model, self.cache_root)
+        source_sha = source_sha256(model.path, self.cache_root)
         derivative_id = f"{source_sha[:20]}-{DERIVATIVE_SCHEMA_VERSION}-{profile_cfg.name}"
         derivative_dir = self.cache_root / derivative_id
         derivative_dir.mkdir(parents=True, exist_ok=True)
 
+        identities = occurrence_index(model)
         groups = _chunk_groups(model)
         chunks: list[dict[str, Any]] = []
         for index, group in enumerate(groups):
             chunk_id = f"chunk-{index:04d}"
             cache_file = derivative_dir / f"{chunk_id}.json.gz"
             bbox = _bbox_union(group)
+            paths = [item.path for item in group]
             chunks.append(
                 {
                     "id": chunk_id,
                     "part_count": len(group),
-                    "paths": [item.path for item in group],
+                    "paths": paths,
+                    "occurrence_ids": [identities[path]["occurrence_id"] for path in paths],
                     "bbox": bbox,
                     "bbox_diagonal": round(_bbox_diagonal(bbox), 3),
                     "cached": cache_file.exists(),
@@ -175,6 +189,7 @@ class ViewDerivativeStore:
             "model_id": model.model_id,
             "version": model.version,
             "streaming": True,
+            "strategy": "proxy-overview+on-demand-detail",
             "profile": {
                 "name": profile_cfg.name,
                 "deviation": profile_cfg.deviation,
@@ -235,6 +250,7 @@ class ViewDerivativeStore:
         )
         _expand_shape_refs(shapes, meshes)
         _normalize_viewer_tree(shapes)
+        _attach_occurrence_identity(shapes, model, meta["paths"])
         payload = _json_safe(
             {
                 "shapes": shapes,
@@ -243,6 +259,7 @@ class ViewDerivativeStore:
                     "profile": cfg.name,
                     "part_count": meta["part_count"],
                     "paths": meta["paths"],
+                    "occurrence_ids": meta["occurrence_ids"],
                     "cache": "MISS",
                     "tessellation_ms": round((time.perf_counter() - started) * 1000, 1),
                 },
