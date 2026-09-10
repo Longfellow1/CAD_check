@@ -1,50 +1,65 @@
-"""Electron-desktop Runtime Controller entrypoint.
+"""Electron Desktop Runtime Controller.
 
-The FastAPI process is an internal localhost control plane for the Electron
-product.  Standalone browser use is only a developer harness.  Blocking STEP,
-XCAF, tessellation and verification calls must go through ``/api/jobs`` so they
-execute in the isolated CAD Worker process.
+This process is deliberately a *control plane*, not a CAD process.  It serves
+only the Electron Renderer, Check Card metadata and job/replay APIs.  STEP/XCAF,
+OCP/OCCT geometry, tessellation and verification are imported/executed only by
+``server.cad_worker`` in a separate process.
+
+Standalone browser access is a developer harness only.  When Electron supplies
+``CAD_CHECK_SESSION_TOKEN`` every API call is session/product-form guarded.
 """
 from __future__ import annotations
 
 import atexit
 import os
+from pathlib import Path
 from typing import Any
 
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
-from .app import app as base_app, ROOT
+from .check_registry import CheckCardRegistry
 from .desktop_api import create_desktop_router
 
 
+ROOT = Path(__file__).resolve().parent.parent
+WEB_DIST = ROOT / "web" / "dist"
+WEB = WEB_DIST if WEB_DIST.exists() else ROOT / "web"
+
+base_app = FastAPI(title="CAD Check Electron Runtime Controller", version="0.3.0")
+base_app.mount("/static", StaticFiles(directory=WEB), name="static")
+
+cards = CheckCardRegistry(ROOT / "checks")
 desktop_router, cad_worker_manager = create_desktop_router(ROOT)
 base_app.include_router(desktop_router)
 atexit.register(cad_worker_manager.shutdown)
 
 
-# Legacy routes remain on ``server.app`` for developer/backward compatibility,
-# but Electron is forbidden from reaching them because they can execute OCCT in
-# the Runtime Controller process.  This makes an accidental regression to the
-# old synchronous Web architecture fail closed instead of silently blocking UI
-# health/status/cancel calls.
-def _legacy_heavy_path(path: str) -> bool:
-    if path in {
-        "/api/models/upload",
-        "/api/models/register",
-        "/api/runs/check",
-        "/api/runs/regression",
-        "/api/runs/explore",
-    }:
-        return True
-    if path.startswith("/api/models/"):
-        return True
-    if path.startswith("/api/runs/") and path.endswith("/viewer"):
-        return True
-    return False
+@base_app.get("/")
+def index():
+    return FileResponse(WEB / "index.html")
+
+
+@base_app.get("/api/health")
+def health():
+    # Do not import OCP here.  CAD Worker health has a separate endpoint.
+    return {
+        "ok": True,
+        "version": "0.3.0",
+        "product_form": "electron",
+        "role": "runtime-controller",
+    }
+
+
+@base_app.get("/api/check-cards")
+def check_cards():
+    cards.reload()
+    return [card.model_dump(mode="json") for card in cards.list()]
 
 
 class DesktopSessionGuard:
-    """ASGI guard for product form, session isolation and worker-only CAD I/O."""
+    """ASGI guard for the Electron-only product contract."""
 
     def __init__(self, inner: Any, token: str | None):
         self.inner = inner
@@ -63,15 +78,6 @@ class DesktopSessionGuard:
                 response = JSONResponse(
                     status_code=403,
                     content={"detail": "Electron desktop session required"},
-                )
-                await response(scope, receive, send)
-                return
-            if _legacy_heavy_path(path):
-                response = JSONResponse(
-                    status_code=410,
-                    content={
-                        "detail": "Legacy synchronous CAD endpoint disabled in Electron; submit an isolated /api/jobs task instead"
-                    },
                 )
                 await response(scope, receive, send)
                 return
