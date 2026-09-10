@@ -61,3 +61,25 @@ test('waitForHealth accepts a responding local health endpoint', async () => {
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test('waitForHealth sends Electron session and product-form headers', async () => {
+  const token = 'test-session-token';
+  const server = http.createServer((request, response) => {
+    const ok = request.url === '/api/health'
+      && request.headers['x-cad-check-session'] === token
+      && request.headers['x-cad-check-product-form'] === 'electron';
+    response.writeHead(ok ? 200 : 403, { 'content-type': 'application/json' });
+    response.end(ok ? '{"ok":true}' : '{"ok":false}');
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  try {
+    await waitForHealth(`http://127.0.0.1:${address.port}/api/health`, {
+      token,
+      timeoutMs: 1000,
+      intervalMs: 20,
+    });
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
