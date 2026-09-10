@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('cadDesktop', {
   platform: process.platform,
   runtimeStatus: () => ipcRenderer.invoke('runtime:status'),
   restartRuntime: () => ipcRenderer.invoke('runtime:restart'),
+  pickStepFile: () => ipcRenderer.invoke('file:open-step'),
   onRuntimeState: (callback) => {
     if (typeof callback !== 'function') return () => {};
     const listener = (_event, status) => callback(status);
