@@ -1,9 +1,16 @@
 {
-  "name":"cad-check-stage2-web",
-  "private":true,
-  "version":"0.2.0",
-  "type":"module",
-  "scripts":{"build":"vite build","dev":"vite --host 127.0.0.1 --port 5173"},
-  "dependencies":{"three-cad-viewer":"5.0.5"},
-  "devDependencies":{"vite":"7.1.4"}
+  "name": "cad-check-electron-renderer",
+  "private": true,
+  "version": "0.3.0",
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite --host 127.0.0.1 --port 5173"
+  },
+  "dependencies": {
+    "@babylonjs/core": "9.23.0"
+  },
+  "devDependencies": {
+    "vite": "7.1.4"
+  }
 }
