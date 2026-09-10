@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+import importlib.metadata
 import json
+import platform
+import sys
 
 from .cad.assembly_tree import IMPORT_SCHEMA_VERSION, occurrence_id_for_path
 from .cad.binding import resolve_binding
@@ -12,12 +15,11 @@ from .domain import CheckExecution, RegressionResult, RegressionStatus, Verifica
 EXECUTOR_VERSION = "occt-executor-v1"
 
 
-def _geometry_method(execution: CheckExecution) -> str | None:
+def _geometry_step(execution: CheckExecution) -> dict[str, Any]:
     for step in execution.trace:
         if step.stage == "geometry":
-            value = step.detail.get("method")
-            return str(value) if value else None
-    return None
+            return step.detail
+    return {}
 
 
 def _binding_entry(model, binding_data: dict[str, Any], semantic_id: str | None):
@@ -34,6 +36,22 @@ def _binding_entry(model, binding_data: dict[str, Any], semantic_id: str | None)
     }
 
 
+def runtime_snapshot() -> dict[str, Any]:
+    def version(name: str) -> str | None:
+        try:
+            return importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            return None
+
+    return {
+        "python": sys.version.split()[0],
+        "platform": platform.platform(),
+        "cadquery_ocp": version("cadquery-ocp"),
+        "ocp_tessellate": version("ocp-tessellate"),
+        "executor_version": EXECUTOR_VERSION,
+    }
+
+
 def enrich_execution(
     root: str | Path,
     model,
@@ -43,17 +61,20 @@ def enrich_execution(
     *,
     rule_version: str | None = None,
 ) -> CheckExecution:
-    """Attach the V1.1 auditable Evidence contract to an execution."""
+    """Attach reproducibility metadata before a Run receives its final ID."""
     evidence = execution.evidence
     try:
         target = _binding_entry(model, binding_data, case.target)
         counterpart = _binding_entry(model, binding_data, case.counterpart)
         entries = [item for item in (target, counterpart) if item]
     except Exception:
-        # BLOCKED results may intentionally have incomplete bindings.  Keep the
-        # failure auditable without inventing identity.
+        # BLOCKED results can intentionally have incomplete bindings.  Never
+        # invent a path/occurrence by fuzzy name matching just to make Evidence.
+        target = None
+        counterpart = None
         entries = []
 
+    geometry = _geometry_step(execution)
     evidence.focus_paths = [item["path"] for item in entries]
     evidence.focus_occurrence_ids = [
         item["occurrence_id"] for item in entries if item.get("occurrence_id")
@@ -63,21 +84,25 @@ def enrich_execution(
         Path(root) / ".cadcheck" / "cache" / "source",
     )
     evidence.import_schema_version = IMPORT_SCHEMA_VERSION
+    evidence.case_id = case.id
+    evidence.case_version = case.version
     evidence.rule_version = rule_version or case.source_ref
     evidence.executor_version = EXECUTOR_VERSION
-    evidence.measurement_method = _geometry_method(execution) or case.verification_method
+    evidence.measurement_method = str(geometry.get("method") or case.verification_method)
+    evidence.approximation = geometry.get("approximation")
     evidence.executor_params = {
         key: value
         for key, value in {
             "executor": case.executor,
             "axis": case.axis,
             "angle_axis": case.angle_axis,
+            "workflow_id": case.workflow_id,
         }.items()
         if value is not None
     }
     evidence.binding_snapshot = {
-        "target": target if entries and target else None,
-        "counterpart": counterpart if entries and counterpart else None,
+        "target": target,
+        "counterpart": counterpart,
     }
     evidence.coordinate_system = {
         "id": model.coordinate_contract,
@@ -89,9 +114,20 @@ def enrich_execution(
         ],
     }
     evidence.source_unit = model.source_unit
+    evidence.runtime_info = runtime_snapshot()
     if case.rule is not None:
         evidence.tolerance = case.rule.tolerance
         evidence.threshold = case.rule.threshold
+        evidence.rule_snapshot = {
+            "authority": case.rule.authority.value if case.rule.authority else None,
+            "operator": case.rule.operator,
+            "threshold": case.rule.threshold,
+            "lower": case.rule.lower,
+            "upper": case.rule.upper,
+            "unit": case.rule.unit,
+            "tolerance": case.rule.tolerance,
+            "source_ref": case.source_ref,
+        }
     evidence.view_state = {
         "camera_preset": evidence.camera_preset,
         "focus_occurrence_ids": evidence.focus_occurrence_ids,
@@ -100,8 +136,22 @@ def enrich_execution(
             "line_start": evidence.line_start,
             "line_end": evidence.line_end,
             "text": evidence.annotation,
+            "axis": case.axis or case.angle_axis,
         },
     }
+    return execution
+
+
+def finalize_evidence_identity(
+    execution: CheckExecution,
+    *,
+    run_id: str,
+    check_set_id: str,
+) -> CheckExecution:
+    evidence = execution.evidence
+    evidence.run_id = run_id
+    evidence.check_set_id = check_set_id
+    evidence.evidence_id = f"{run_id}:{execution.case_id}:{execution.model_version}"
     return execution
 
 
@@ -110,7 +160,7 @@ def strict_compare(
     candidate: CheckExecution,
     case: VerificationCase,
 ) -> RegressionResult:
-    """Compare only when the engineering and identity contracts are compatible."""
+    """Compare only when engineering, method and semantic identity contracts match."""
     reasons: list[str] = []
     b = baseline.evidence
     c = candidate.evidence
@@ -133,6 +183,8 @@ def strict_compare(
         reasons.append("coordinate_system_changed")
     if b.rule_version != c.rule_version:
         reasons.append("rule_version_changed")
+    if b.case_version != c.case_version:
+        reasons.append("case_version_changed")
     if not b.import_schema_version or not c.import_schema_version:
         reasons.append("import_schema_missing")
     elif b.import_schema_version != c.import_schema_version:
@@ -195,6 +247,7 @@ def rewrite_run_result(
     run_dir: str | Path,
     *,
     execution: CheckExecution | None = None,
+    executions: list[CheckExecution] | None = None,
     baseline: list[CheckExecution] | None = None,
     candidate: list[CheckExecution] | None = None,
     regression: list[RegressionResult] | None = None,
@@ -205,6 +258,8 @@ def rewrite_run_result(
     payload = json.loads(path.read_text(encoding="utf-8"))
     if execution is not None:
         payload["execution"] = execution.model_dump(mode="json")
+    if executions is not None:
+        payload["executions"] = [item.model_dump(mode="json") for item in executions]
     if baseline is not None:
         payload["baseline"] = [item.model_dump(mode="json") for item in baseline]
     if candidate is not None:
