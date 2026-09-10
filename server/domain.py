@@ -56,6 +56,7 @@ class Rule(BaseModel):
     lower: float | None = None
     upper: float | None = None
     unit: str = "mm"
+    tolerance: float = 0.0
     authority: RuleAuthority | None = None
 
 
