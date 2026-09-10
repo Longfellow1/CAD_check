@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from pathlib import Path
 from typing import Any, Literal
 
@@ -31,11 +32,15 @@ class JobRequest(BaseModel):
         "PING",
     ]
     payload: dict[str, Any] = Field(default_factory=dict)
-    timeout_s: float | None = Field(default=None, ge=1.0, le=3600.0)
+    timeout_s: float | None = Field(default=None, ge=0.1, le=3600.0)
 
 
 class ReplayStateRequest(BaseModel):
     state: dict[str, Any]
+
+
+class ScreenshotRequest(BaseModel):
+    data_url: str
 
 
 def create_desktop_router(root: str | Path) -> tuple[APIRouter, CadWorkerManager]:
@@ -119,8 +124,40 @@ def create_desktop_router(root: str | Path) -> tuple[APIRouter, CadWorkerManager
         except KeyError as exc:
             raise HTTPException(404, "job not found") from exc
 
+    @router.get("/runs/{run_id}")
+    def run_result(run_id: str):
+        path = run_root / run_id / "result.json"
+        if not path.exists():
+            raise HTTPException(404, "run not found")
+        return FileResponse(path, media_type="application/json")
+
+    @router.get("/runs/{run_id}/trace")
+    def run_trace(run_id: str):
+        path = run_root / run_id / "trace.jsonl"
+        if not path.exists():
+            raise HTTPException(404, "trace not found")
+        return FileResponse(path, media_type="application/x-ndjson")
+
+    @router.post("/runs/{run_id}/evidence/{case_id}/screenshot")
+    def persist_screenshot(run_id: str, case_id: str, request: ScreenshotRequest):
+        prefix = "data:image/png;base64,"
+        if not request.data_url.startswith(prefix):
+            raise HTTPException(400, "expected PNG data URL")
+        try:
+            payload = base64.b64decode(request.data_url[len(prefix):], validate=True)
+        except Exception as exc:
+            raise HTTPException(400, "invalid PNG base64") from exc
+        if not payload.startswith(b"\x89PNG\r\n\x1a\n"):
+            raise HTTPException(400, "invalid PNG signature")
+        path = run_root / run_id / "evidence" / f"{case_id}.png"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(payload)
+        return {"saved": str(path), "bytes": len(payload)}
+
     @router.post("/runs/{run_id}/evidence/{case_id}/view-state")
     def persist_view_state(run_id: str, case_id: str, request: ReplayStateRequest):
+        if not (run_root / run_id / "result.json").exists():
+            raise HTTPException(404, "run not found")
         try:
             path = save_replay_state(run_root, run_id, case_id, request.state)
             return {"saved": str(path)}
