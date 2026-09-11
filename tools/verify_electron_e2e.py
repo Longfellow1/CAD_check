@@ -35,6 +35,10 @@ def main() -> int:
         raise AssertionError(f"Electron E2E missing stages: {sorted(missing)}")
 
     viewer = payload.get("viewer") or {}
+    if viewer.get("viewer") != "xeokit":
+        raise AssertionError(f"Electron did not exercise xeokit viewer: {viewer}")
+    if viewer.get("representation") != "SceneModel DTX proxy + demand detail":
+        raise AssertionError(f"Unexpected xeokit representation: {viewer}")
     if viewer.get("proxy_count", 0) < 12:
         raise AssertionError(f"Viewer did not retain controlled overview: {viewer}")
     if viewer.get("resident_detail_occurrences", 0) > viewer.get("max_resident_details", 24):

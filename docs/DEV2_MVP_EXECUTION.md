@@ -21,57 +21,70 @@
 
 ### P0 — Architecture & Runtime
 
-- [ ] Runtime Controller / CAD Worker 独立进程闭环
-- [ ] Job 状态：QUEUED / RUNNING / SUCCEEDED / FAILED / CANCELLED / TIMED_OUT
-- [ ] Progress phase / heartbeat age / cancel / timeout / worker restart
-- [ ] Electron Main 管理 Runtime 生命周期；退出无残留 sidecar/worker
-- [ ] Electron Desktop 禁止调用 legacy synchronous heavy CAD endpoints
+- [x] Runtime Controller / CAD Worker 独立进程闭环
+- [x] Job 状态：QUEUED / RUNNING / SUCCEEDED / FAILED / CANCELLED / TIMED_OUT
+- [x] Progress phase / heartbeat age / cancel / timeout / worker restart
+- [x] Electron Main 管理 Runtime 生命周期；退出无残留 sidecar/worker
+- [x] Electron Desktop 禁止调用 legacy synchronous heavy CAD endpoints
 
 ### P0 — Model / Identity / Readiness
 
-- [ ] Electron 原生打开本地 STEP，不走 Web upload
-- [ ] Canonical AssemblyTree 保留 parent-child / path / transform / bbox / geometry_ref
-- [ ] `occurrence_id` 对同一 Model SHA + import schema 确定性复现
-- [ ] Readiness 区分 preview 与 engineering check；局部坏 B-Rep / binding 只阻断受影响 Case
-- [ ] Replay 校验 model_sha + import_schema_version + occurrence_id，不按名称猜测
+- [x] Electron 原生打开本地 STEP，不走 Web upload
+- [x] Canonical AssemblyTree 保留 parent-child / path / transform / bbox / geometry_ref
+- [x] `occurrence_id` 对同一 Model SHA + import schema 确定性复现
+- [x] Readiness 区分 preview 与 engineering check；局部坏 B-Rep / binding 只阻断受影响 Case
+- [x] Replay 校验 model_sha + import_schema_version + occurrence_id，不按名称猜测
 
 ### P0 — Verification / Evidence / Regression
 
-- [ ] Minimum Clearance Golden
-- [ ] Directional Distance Golden
-- [ ] Angle / Orientation Golden
-- [ ] 15–25 Coverage Cases 仅依赖 3 个 Executor
-- [ ] 单 Case + Check Set
-- [ ] FAIL / REVIEW_REQUIRED 自动定位、标注、Evidence、截图、View State
-- [ ] Evidence 记录 Run / Check Set / Case / model SHA / binding / rule / method / executor / coordinate / unit / tolerance / runtime
-- [ ] Replay 恢复工程状态；不兼容时降级为结构化记录 + 原截图
-- [ ] Regression 严格可比；不兼容输出 NON_COMPARABLE，不整批误杀其它 Case
+- [x] Minimum Clearance Golden
+- [x] Directional Distance Golden
+- [x] Angle / Orientation Golden
+- [x] 15–25 Coverage Cases 仅依赖 3 个 Executor
+- [x] 单 Case + Check Set
+- [x] FAIL / REVIEW_REQUIRED 自动定位、标注、Evidence、截图、View State
+- [x] Evidence 记录 Run / Check Set / Case / model SHA / binding / rule / method / executor / coordinate / unit / tolerance / runtime
+- [x] Replay 恢复工程状态；不兼容时降级为结构化记录 + 原截图
+- [x] Regression 严格可比；不兼容输出 NON_COMPARABLE，不整批误杀其它 Case
 
 ### P0 — Viewer
 
-- [ ] `three-cad-viewer` 不再是产品 Renderer 依赖
-- [ ] Babylon Viewer Adapter 满足 loadOverview / selection / visibility / isolate / focus / section / evidence / capture / replay state
-- [ ] 大模型默认 Canonical bbox Proxy Overview
-- [ ] Detail 按需加载并有 resident budget，不随叶件数量无限增长
-- [ ] 选中结果默认目标高亮 + Context 半透明；Isolate 仅由用户显式触发
-- [ ] Regression 单 Viewer V1/V2 切换
+- [x] `three-cad-viewer` 不再是产品 Renderer 依赖
+- [x] Babylon 退出产品依赖；xeokit SDK 进入 dev-2 Viewer Trial
+- [x] Xeokit Viewer Adapter 满足 loadOverview / selection / visibility / isolate / focus / section / evidence / capture / replay state
+- [x] Overview 使用 xeokit `SceneModel` + DTX + shared unit-box instancing，Canonical bbox 作为轻量整车代理
+- [x] Detail 继续由 Python/OCP 按需生成；Viewer resident budget 限制常驻 detail，不随叶件数量无限增长
+- [x] 复用 xeokit CameraControl / NavCube / SectionPlanes / selection/xray/edge emphasis，不重复手搓通用 3D 能力
+- [x] 选中结果默认目标高亮 + Context X-Ray；Isolate 仅由用户显式触发
+- [x] Regression 单 Viewer V1/V2 切换
+- [ ] xeokit 最终冻结：必须通过本地 Scania 规模与 CAD 交互体验 Gate 后才能从 Trial 升级为 Frozen
 
 ### Automated delivery Gate
 
-- [ ] Python full suite green
-- [ ] Renderer production build green
-- [ ] Electron Main/runtime Node tests green
-- [ ] Electron controlled-flow E2E：FAIL → Evidence → Replay → Regression green
-- [ ] macOS CI smoke green
-- [ ] Windows x64 CI smoke green
-- [ ] Ubuntu integration CI green
-- [ ] Product-form guard：browser-only / legacy viewer / sync heavy path 回归会直接失败
+- [x] Python full suite green
+- [x] Renderer production build green
+- [x] Electron Main/runtime Node tests green
+- [x] Electron controlled-flow E2E：FAIL → Evidence → Replay → Regression green
+- [x] macOS CI smoke green
+- [x] Windows x64 CI smoke green
+- [x] Ubuntu integration CI green
+- [x] Product-form guard：browser-only / legacy viewer / sync heavy path 回归会直接失败
+- [ ] Xeokit migration CI：Linux / macOS / Windows Electron E2E 必须确认 `viewer=xeokit` 后才可交付本地手测
 
 ### Physical / business Gate（交付后由真实环境完成）
 
 - [ ] G2：目标工程师无开发者代操作手测
 - [ ] G3：本地约 295MB Scania Electron Scale Gate
 - [ ] G4：真实 Windows GPU/中文路径补充手测（CI 之外）
+
+## Xeokit Trial 边界
+
+当前 xeokit 使用定位为 **企业内部 MVP/技术验证**：
+
+- 使用官方 `@xeokit/xeokit-sdk` npm 包，不修改 xeokit SDK 源码。
+- 不将 xeokit 作为 STEP/BRep 真值层；只作为 Electron Renderer 的显示与交互依赖。
+- Python/OCP、规则、Evidence、Replay、Canonical Identity 与 xeokit 解耦，保留 Viewer 可替换性。
+- 当前按 AGPL 内部验证边界使用；若进入外部分发、客户/供应商安装、SaaS/网络服务或正式闭源商业交付，必须重新进行 License Review，必要时切换 xeokit 商业许可。
 
 ## Delivery rule
 

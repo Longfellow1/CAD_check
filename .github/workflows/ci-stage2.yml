@@ -40,13 +40,16 @@ jobs:
       - name: Check Electron Main/runtime contract
         working-directory: desktop
         run: npm run check
-      - name: Assert product form and no legacy viewer route
+      - name: Assert product form and xeokit viewer route
         shell: bash
         run: |
           grep -q "npm --prefix desktop start" start.sh
           ! grep -q "uvicorn" start.sh
           grep -q "NOT PRODUCT" scripts/start-web-dev.sh
+          grep -q "@xeokit/xeokit-sdk" web/package.json
+          ! grep -q "@babylonjs" web/package.json
           ! grep -R "three-cad-viewer" web/package.json web/src/main_v4.js
+          grep -q "XeokitCadViewer" web/src/viewer/xeokit_cad_viewer.js
           ! grep -q "/viewer/manifest" web/src/main_v4.js
           ! grep -q "create_streaming_router" server/app_v2.py
       - name: Upload contract evidence
