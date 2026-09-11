@@ -167,10 +167,14 @@ def test_timeout_kills_worker_and_recovers(manager: CadWorkerManager):
 def test_explicit_worker_restart_keeps_controller_usable(manager: CadWorkerManager):
     before = manager.worker_status()
     restarted = manager.restart()
-    assert restarted["state"] == "RUNNING"
+    # restart() is intentionally non-blocking: STARTING is valid until the new
+    # worker emits its first heartbeat. The product contract is proven by the
+    # immediately following PING and the final RUNNING state.
+    assert restarted["state"] in {"STARTING", "RUNNING"}
     assert restarted["pid"]
     if before.get("pid"):
         assert restarted["pid"] != before["pid"]
 
     ping = submit_and_wait(manager, "PING", {}, timeout_s=10.0)
     assert ping["state"] == "SUCCEEDED", ping
+    assert manager.worker_status()["state"] == "RUNNING"
