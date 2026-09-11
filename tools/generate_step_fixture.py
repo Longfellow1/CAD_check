@@ -9,6 +9,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # Controlled fixture contract:
 # CLR_BAT_BRACKET must measure 12.0 mm in V1 and 8.0 mm in V2.
+# DIR_BAT_GROUND uses a 10 mm ground reference centered at Z=-5 so its top
+# surface is exactly Z=0, matching controlled-fixture-spec.yaml.
 BASE = {
     "battery": ((1500, 1100, 120), (0, 0, 220), (0, 0, 0)),
     "underbody_bracket": ((500, 800, 20), (0, 0, 138), (0, 0, 0)),
@@ -20,7 +22,7 @@ BASE = {
     "controller_bracket": ((300, 40, 180), (300, -515, 610), (0, 0, 0)),
     "exhaust": ((600, 180, 180), (720, 480, 450), (0, 0, 0)),
     "front_crossmember": ((130, 1150, 120), (1020, 0, 330), (0, 0, 0)),
-    "ground_ref": ((2800, 1700, 10), (0, 0, 0), (0, 0, 0)),
+    "ground_ref": ((2800, 1700, 10), (0, 0, -5), (0, 0, 0)),
     "rear_module": ((460, 420, 300), (-800, 0, 420), (0, 0.6, 0)),
 }
 
