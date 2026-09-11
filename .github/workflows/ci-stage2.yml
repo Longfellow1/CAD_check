@@ -28,10 +28,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Install Renderer dependencies
+        working-directory: web
+        run: npm install
       - name: Build Electron Renderer bundle
-        run: npm --prefix web install && npm --prefix web run build
+        working-directory: web
+        run: npm run build
+      - name: Install Electron Main dependencies
+        working-directory: desktop
+        run: npm install
       - name: Check Electron Main/runtime contract
-        run: npm --prefix desktop install && npm --prefix desktop run check
+        working-directory: desktop
+        run: npm run check
       - name: Assert product form and no legacy viewer route
         shell: bash
         run: |
@@ -70,18 +78,26 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Install and build Renderer
-        run: npm --prefix web install && npm --prefix web run build
+      - name: Install Renderer dependencies
+        working-directory: web
+        run: npm install
+      - name: Build Renderer
+        working-directory: web
+        run: npm run build
       - name: Install Electron shell
-        run: npm --prefix desktop install
+        working-directory: desktop
+        run: npm install
       - name: Electron static/runtime tests
-        run: npm --prefix desktop run check
+        working-directory: desktop
+        run: npm run check
       - name: Run real Electron E2E on Linux
         if: runner.os == 'Linux'
-        run: xvfb-run -a npm --prefix desktop run e2e -- --no-sandbox
+        working-directory: desktop
+        run: xvfb-run -a npm run e2e -- --no-sandbox
       - name: Run real Electron E2E on macOS / Windows
         if: runner.os != 'Linux'
-        run: npm --prefix desktop run e2e
+        working-directory: desktop
+        run: npm run e2e
       - name: Verify Electron delivery report
         run: python tools/verify_electron_e2e.py
       - name: Upload Electron E2E evidence
