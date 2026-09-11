@@ -42,10 +42,31 @@ def now_iso() -> str:
 
 
 def atomic_json(path: Path, payload: dict[str, Any]) -> None:
+    """Write JSON atomically and tolerate transient Windows sharing locks.
+
+    Electron polls status files while the CAD Worker updates them. On Windows a
+    reader can briefly prevent replacement of the destination file. Use a unique
+    temp file per write, then retry only transient sharing/access failures.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp = path.with_name(
+        f".{path.name}.{os.getpid()}.{threading.get_ident()}.{uuid.uuid4().hex}.tmp"
+    )
     tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.replace(tmp, path)
+    try:
+        for attempt in range(40):
+            try:
+                os.replace(tmp, path)
+                return
+            except PermissionError:
+                if os.name != "nt" or attempt == 39:
+                    raise
+            except OSError as exc:
+                if os.name != "nt" or getattr(exc, "winerror", None) not in {5, 32} or attempt == 39:
+                    raise
+            time.sleep(min(0.01 * (attempt + 1), 0.1))
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def load_json(path: Path, default: Any = None):
