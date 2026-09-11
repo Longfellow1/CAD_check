@@ -25,9 +25,13 @@ def test_registry_loads_the_three_mvp_golden_check_cards():
         card = registry.get(card_id)
         assert card.rule.authority == RuleAuthority.FORMAL
         assert card.ground_truth is not None
-        assert card.ground_truth.get("status") == "LOCKED"
-        assert card.ground_truth.get("source_ref")
+        assert card.ground_truth.get("fixture") == "controlled_vehicle"
+        assert card.ground_truth.get("truth_source")
+        assert card.ground_truth.get("method")
+        assert card.ground_truth.get("coordinate_system") == "X-forward/Y-left/Z-up"
+        assert card.ground_truth.get("unit")
         assert card.ground_truth.get("tolerance") is not None
+        assert set(card.ground_truth.get("expected", {})) == {"V1", "V2"}
 
     assert registry.get("CLR_BAT_BRACKET").executor == "minimum_clearance"
     assert registry.get("DIR_BAT_GROUND").executor == "directional_distance"
