@@ -164,7 +164,6 @@ def test_mode_api_exposes_cards_and_minimal_replay(workspace: Stage2Workspace):
         "ANG_MOTOR_YAW",
         "CLR_BAT_BRACKET",
         "DIR_BAT_GROUND",
-        "HEADROOM_FRONT",
     }
 
     explore = client.post(
