@@ -9,7 +9,8 @@ on:
   pull_request:
 
 jobs:
-  cad-integration:
+  contract:
+    name: PRD contract / Python-OCP
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,9 +21,7 @@ jobs:
         run: python -m pip install -r requirements.lock.txt
       - name: Generate real AP242 controlled fixture
         run: python tools/generate_step_fixture.py
-      - name: Readiness must fail closed
-        run: python tools/readiness.py
-      - name: Run P0 test suite and product-form contract
+      - name: Run complete Python contract suite
         run: python -m pytest -q
       - name: Prove controlled 12/8 regression contract
         run: python tools/run_step_demo.py
@@ -30,21 +29,67 @@ jobs:
         with:
           node-version: "22"
       - name: Build Electron Renderer bundle
-        run: npm install && npm run build
-        working-directory: web
+        run: npm --prefix web install && npm --prefix web run build
       - name: Check Electron Main/runtime contract
-        run: npm install && npm run check
-        working-directory: desktop
-      - name: Assert primary launcher is Electron
+        run: npm --prefix desktop install && npm --prefix desktop run check
+      - name: Assert product form and no legacy viewer route
         shell: bash
         run: |
           grep -q "npm --prefix desktop start" start.sh
           ! grep -q "uvicorn" start.sh
           grep -q "NOT PRODUCT" scripts/start-web-dev.sh
-      - name: Upload run evidence
+          ! grep -R "three-cad-viewer" web/package.json web/src/main_v4.js
+          ! grep -q "/viewer/manifest" web/src/main_v4.js
+          ! grep -q "create_streaming_router" server/app_v2.py
+      - name: Upload contract evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cad-check-integration-evidence
+          name: cad-check-contract-evidence
           path: .cadcheck/runs
+          if-no-files-found: ignore
+
+  electron-e2e:
+    name: Electron E2E / ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install locked Python dependencies
+        run: python -m pip install -r requirements.lock.txt
+      - name: Register Python executable for Electron Runtime
+        run: python -c "import os,sys; open(os.environ['GITHUB_ENV'],'a',encoding='utf-8').write('CAD_CHECK_PYTHON='+sys.executable+'\n')"
+      - name: Generate AP242 fixture
+        run: python tools/generate_step_fixture.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install and build Renderer
+        run: npm --prefix web install && npm --prefix web run build
+      - name: Install Electron shell
+        run: npm --prefix desktop install
+      - name: Electron static/runtime tests
+        run: npm --prefix desktop run check
+      - name: Run real Electron E2E on Linux
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm --prefix desktop run e2e -- --no-sandbox
+      - name: Run real Electron E2E on macOS / Windows
+        if: runner.os != 'Linux'
+        run: npm --prefix desktop run e2e
+      - name: Verify Electron delivery report
+        run: python tools/verify_electron_e2e.py
+      - name: Upload Electron E2E evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: electron-e2e-${{ runner.os }}
+          path: |
+            .cadcheck/e2e
+            .cadcheck/runs
           if-no-files-found: ignore
