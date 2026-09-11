@@ -11,12 +11,14 @@ ROOT = Path(__file__).resolve().parents[1]
 # CLR_BAT_BRACKET must measure 12.0 mm in V1 and 8.0 mm in V2.
 # DIR_BAT_GROUND uses a 10 mm ground reference centered at Z=-5 so its top
 # surface is exactly Z=0, matching controlled-fixture-spec.yaml.
+# ANG_MOTOR_YAW keeps the Golden motor at 0 deg in V1/V2; other Coverage
+# objects may still vary to exercise the shared angle executor.
 BASE = {
     "battery": ((1500, 1100, 120), (0, 0, 220), (0, 0, 0)),
     "underbody_bracket": ((500, 800, 20), (0, 0, 138), (0, 0, 0)),
     "left_rail": ((1700, 90, 160), (0, 650, 300), (0, 0, 0)),
     "right_rail": ((1700, 90, 160), (0, -650, 300), (0, 0, 0)),
-    "motor": ((520, 480, 420), (650, 0, 520), (0, 0, 0.8)),
+    "motor": ((520, 480, 420), (650, 0, 520), (0, 0, 0)),
     "motor_bracket": ((260, 70, 240), (650, 295, 520), (0, 0, 0)),
     "controller": ((360, 260, 150), (300, -360, 610), (0, 1.0, 0)),
     "controller_bracket": ((300, 40, 180), (300, -515, 610), (0, 0, 0)),
@@ -37,7 +39,6 @@ def variant(version: str):
         data["battery"][1] = [0, 0, 216]
         data["controller"][1] = [300, -375, 610]
         data["motor"][1] = [680, 0, 520]
-        data["motor"][2] = [0, 0, 2.2]
         data["rear_module"][2] = [0, 0.1, 0]
     return data
 
