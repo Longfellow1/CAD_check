@@ -1,6 +1,6 @@
 import './style_v3.css';
 import './viewer/viewer.css';
-import { BabylonCadViewer } from './viewer/babylon_cad_viewer.js';
+import { XeokitCadViewer } from './viewer/xeokit_product_viewer.js';
 
 const LABELS = {
   MEASURED:'已测量', NEW_FAIL:'新增不满足', FIXED:'已修复', IMPROVED:'改善',
@@ -21,6 +21,7 @@ const JOB_PHASE = {
 const state = {
   models:{}, cards:[], model:null, openInfo:null, assembly:null,
   viewer:null, tab:TAB.CHECKS, activeJob:null,
+  previewToken:0, previewLoading:false,
   selectedCase:null, selectedOccurrence:null, lastPick:null,
   quickMeasure:false, sectionEnabled:false,
   checkScope:'SET', checkCardId:'CLR_BAT_BRACKET',
@@ -85,7 +86,7 @@ $('#app').innerHTML = `
 
     <section class="panel viewer-panel">
       <div class="viewer-head">
-        <div><strong id="vt">等待模型</strong><span class="muted" id="viewer-meta">Babylon / native OCP</span></div>
+        <div><strong id="vt">等待模型</strong><span class="muted" id="viewer-meta">xeokit / native OCP</span></div>
         <div class="viewer-tools">
           <button id="show-all" class="tool-btn">全部显示</button>
           <button id="section" class="tool-btn">Z 剖切</button>
@@ -93,7 +94,7 @@ $('#app').innerHTML = `
         </div>
       </div>
       <div id="cad" class="cad-host"><div class="empty">Electron Viewer 初始化中</div></div>
-      <div id="viewer-badge" class="viewer-badge">BABYLON · NATIVE OCP · PROXY/DETAIL</div>
+      <div id="viewer-badge" class="viewer-badge">XEOKIT · NATIVE OCP · PROXY/DETAIL</div>
     </section>
 
     <aside class="panel inspector-panel">
@@ -107,7 +108,7 @@ $('#app').innerHTML = `
     <span id="status-runtime">Runtime: —</span>
     <span id="status-worker">Worker: —</span>
     <span id="status-tree">Tree: —</span>
-    <span id="status-viewer">Viewer: Babylon</span>
+    <span id="status-viewer">Viewer: xeokit</span>
   </footer>
 </div>`;
 
@@ -168,6 +169,8 @@ async function submitJob(kind, payload={}, timeout_s=null) {
 }
 async function cancelActiveJob() {
   if (!state.activeJob) return;
+  state.previewToken += 1;
+  state.previewLoading = false;
   const id = state.activeJob;
   try {
     const job = await api(`/api/jobs/${id}`, {method:'DELETE'});
@@ -179,15 +182,20 @@ async function cancelActiveJob() {
 
 function ensureViewer() {
   if (state.viewer) return state.viewer;
-  state.viewer = new BabylonCadViewer($('#cad'), {
+  state.viewer = new XeokitCadViewer($('#cad'), {
     maxResidentDetails:24,
     onPick:(occurrenceId, point, component) => {
       state.lastPick = {occurrenceId, point:point?.asArray?.() || null, component};
       selectOccurrence(occurrenceId, {loadDetail:false}).catch(console.error);
     },
   });
-  setStatus('#status-viewer', 'Viewer: Babylon ready', 'ok');
+  setStatus('#status-viewer', 'Viewer: xeokit ready', 'ok');
   return state.viewer;
+}
+function resetSectionState() {
+  state.sectionEnabled = false;
+  $('#section')?.classList.remove('active');
+  state.viewer?.setSectionPlane(null);
 }
 function flattenTree(nodes, out=[]) {
   for (const node of nodes || []) {
@@ -201,18 +209,30 @@ function leafNodes() { return allNodes().filter((node) => !node.children?.length
 function nodeById(id) { return allNodes().find((node) => node.occurrence_id === id) || null; }
 
 function acceptOpenedModel(result, {preserve=false}={}) {
+  resetSectionState();
   state.openInfo = result;
   state.assembly = result.assembly;
   state.model = result.model;
   $('#model').value = state.model;
   const viewer = ensureViewer();
   const summary = viewer.loadOverview(state.assembly);
+  // A newly opened model must start in a neutral overview. This clears any
+  // previous xray selection before the first surface-preview chunk arrives.
+  viewer.showAll();
+  viewer.setSelection([]);
   const stats = state.assembly.stats;
+  const largeModel = stats.leaf_count > 80;
   setStatus('#status-tree', `Tree: ${stats.occurrence_count} · depth ${stats.max_depth}`, 'ok');
   setStatus('#status-model', `Model: ${state.model}`, 'ok');
-  setStatus('#status-viewer', `Viewer: ${summary.occurrences} proxy`, 'ok');
+  setStatus(
+    '#status-viewer',
+    largeModel ? `Viewer: ${summary.occurrences} proxy · 面预览准备中` : `Viewer: ${summary.occurrences} proxy`,
+    largeModel ? 'working' : 'ok',
+  );
   $('#vt').textContent = `${state.model} · Overview`;
-  $('#viewer-meta').textContent = `${stats.leaf_count} leaves · proxy-first · detail budget ${summary.max_resident_details}`;
+  $('#viewer-meta').textContent = largeModel
+    ? `${stats.leaf_count} leaves · 中精度面预览渐进加载`
+    : `${stats.leaf_count} leaves · proxy-first · detail budget ${summary.max_resident_details}`;
   $('#readiness-out').textContent = JSON.stringify(result.readiness || {}, null, 2);
   updateModelMeta();
   if (!preserve) {
@@ -224,9 +244,24 @@ function acceptOpenedModel(result, {preserve=false}={}) {
   renderInspector();
 }
 
-async function loadModel(key=state.model, {preserve=false, loadSmallDetail=true}={}) {
+function launchSurfacePreview(modelKey, previewToken) {
+  state.previewLoading = true;
+  setProgress('模型结构已就绪 · 生成中精度面预览…', {indeterminate:true, cancellable:true});
+  void loadSurfacePreview(modelKey, previewToken).catch((error) => {
+    if (previewToken !== state.previewToken) return;
+    state.previewLoading = false;
+    console.error('Surface preview load failed', error);
+    setStatus('#status-viewer', 'Viewer: proxy fallback', 'error');
+    setProgress(`面预览失败：${error?.message || error}`);
+  });
+}
+
+async function loadModel(key=state.model, {preserve=false, loadSmallDetail=true, loadMediumPreview=true}={}) {
   if (!key) throw new Error('没有可加载的模型');
+  const previewToken = ++state.previewToken;
+  state.previewLoading = false;
   state.model = key;
+  resetSectionState();
   state.openInfo = null;
   state.assembly = null;
   state.viewer?.clear();
@@ -235,8 +270,7 @@ async function loadModel(key=state.model, {preserve=false, loadSmallDetail=true}
   const result = await submitJob('OPEN_MODEL', {model:key}, 900);
   acceptOpenedModel(result, {preserve});
 
-  // Small controlled fixtures are made visually complete immediately.  Large
-  // engineering models remain proxy-first: no whole-vehicle detail sweep.
+  // Small controlled fixtures are made visually complete immediately.
   if (loadSmallDetail && result.leaf_count <= 80) {
     const paths = leafNodes().filter((node) => node.valid).map((node) => node.original_path);
     if (paths.length) {
@@ -251,14 +285,67 @@ async function loadModel(key=state.model, {preserve=false, loadSmallDetail=true}
         console.warn('Controlled detail load failed; proxy remains usable', error);
       }
     }
+  } else if (result.leaf_count > 80 && loadMediumPreview) {
+    launchSurfacePreview(key, previewToken);
+    return result;
   }
   setProgress('模型已就绪', {done:true});
   return result;
 }
 
+async function loadSurfacePreview(modelKey, previewToken) {
+  // `normal` is the medium surface profile: unlike the bbox overview it keeps
+  // the real part silhouette, while evidence/detail remains separately gated.
+  const profile = 'normal';
+  const manifestResult = await submitJob('VIEWER_MANIFEST', {model:modelKey, profile}, 900);
+  if (previewToken !== state.previewToken || state.model !== modelKey) return;
+  const manifest = manifestResult.manifest || manifestResult;
+  const chunks = manifest.chunks || [];
+  if (!chunks.length) throw new Error('没有可用的 Viewer 面预览分块');
+
+  let loadedParts = state.viewer.getStats().preview_occurrences || 0;
+  let fallbackParts = 0;
+  for (let index = 0; index < chunks.length; index += 1) {
+    if (previewToken !== state.previewToken || state.model !== modelKey) return;
+    const chunk = chunks[index];
+    const built = await submitJob('VIEWER_CHUNK', {
+      model:modelKey,
+      profile,
+      chunk_id:chunk.id,
+    }, 900);
+    if (previewToken !== state.previewToken || state.model !== modelKey) return;
+    const derivativeId = built.derivative_id || manifest.derivative_id;
+    const payload = await api(
+      `/api/desktop/viewer/${encodeURIComponent(modelKey)}/chunks/${encodeURIComponent(chunk.id)}`
+      + `?derivative_id=${encodeURIComponent(derivativeId)}&profile=${encodeURIComponent(profile)}`,
+    );
+    if (previewToken !== state.previewToken || state.model !== modelKey) return;
+    const loaded = state.viewer.loadPreview(payload);
+    loadedParts += loaded.length;
+    fallbackParts += payload.meta?.skipped_paths?.length || 0;
+    const fraction = (index + 1) / chunks.length;
+    const visibleParts = loadedParts + fallbackParts;
+    const fallbackLabel = fallbackParts ? ` · ${fallbackParts} proxy fallback` : '';
+    setStatus('#status-viewer', `Viewer: 中精度面预览 ${visibleParts}/${manifest.part_count}${fallbackLabel}`, 'working');
+    $('#viewer-meta').textContent = `${manifest.part_count} leaves · surface preview ${index + 1}/${chunks.length}`;
+    setProgress(`中精度面预览 ${visibleParts}/${manifest.part_count}${fallbackLabel}`, {
+      fraction,
+      cancellable:true,
+    });
+  }
+  if (previewToken !== state.previewToken || state.model !== modelKey) return;
+  state.viewer.finishPreview?.();
+  state.previewLoading = false;
+  const visibleParts = loadedParts + fallbackParts;
+  const fallbackLabel = fallbackParts ? ` · ${fallbackParts} proxy fallback` : '';
+  setStatus('#status-viewer', `Viewer: 中精度面预览 ${visibleParts}/${manifest.part_count}${fallbackLabel}`, 'ok');
+  $('#viewer-meta').textContent = `${manifest.part_count} leaves · medium surface preview · on-demand detail${fallbackLabel}`;
+  setProgress('中精度面预览已就绪', {done:true});
+}
+
 async function ensureModelForEvidence(modelKey) {
   if (state.model === modelKey && state.assembly && state.openInfo) return state.openInfo;
-  return loadModel(modelKey, {preserve:true, loadSmallDetail:true});
+  return loadModel(modelKey, {preserve:true, loadSmallDetail:true, loadMediumPreview:false});
 }
 
 async function openNativeStep() {
@@ -267,6 +354,7 @@ async function openNativeStep() {
   }
   const filePath = await window.cadDesktop.pickStepFile();
   if (!filePath) return;
+  const previewToken = ++state.previewToken;
   const response = await api('/api/desktop/models/register', {
     method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path:filePath}),
   });
@@ -274,7 +362,8 @@ async function openNativeStep() {
   await refreshModels();
   const result = await waitForJob(response.job.job_id);
   acceptOpenedModel(result);
-  setProgress('本地 STEP 已打开', {done:true});
+  if (result.leaf_count > 80) launchSurfacePreview(response.descriptor.key, previewToken);
+  else setProgress('本地 STEP 已打开', {done:true});
 }
 
 function treeNodeHtml(node, depth=0) {
@@ -406,7 +495,7 @@ function renderResultInspector(row) {
   const compare = reg ? `<div class="compare-box"><div><span>V1</span><b>${reg.baseline?.value ?? '—'} ${escapeHtml(reg.baseline?.unit || '')}</b></div><div><span>V2</span><b>${reg.candidate?.value ?? '—'} ${escapeHtml(reg.candidate?.unit || '')}</b></div><div><span>Δ</span><b>${reg.delta ?? '—'}</b></div></div>` : '';
   $('#inspector-title').textContent = row.kind === 'regression' ? '版本变化' : '当前校核';
   $('#detail-tag').innerHTML = `<span class="tag ${statusClass(status)}">${escapeHtml(LABELS[status] || status)}</span>`;
-  $('#inspector').innerHTML = `<div class="metric">${e.value ?? '—'} <small>${escapeHtml(e.unit || '')}</small></div>${compare}<dl class="kv"><dt>Case</dt><dd>${escapeHtml(row.caseId)}</dd><dt>成熟度</dt><dd>${escapeHtml(LABELS[e.rule_authority] || e.rule_authority || '—')}</dd><dt>Executor</dt><dd>${escapeHtml(e.executor || '—')}</dd><dt>阈值</dt><dd>${escapeHtml(thresholdText(row))}</dd><dt>Margin</dt><dd>${e.margin ?? '—'}</dd><dt>Method</dt><dd>${escapeHtml(e.evidence?.measurement_method || '—')}</dd><dt>Evidence</dt><dd>${escapeHtml(e.evidence?.annotation || '—')}</dd></dl><div class="action-stack"><button id="view-evidence" class="primary">重新定位 Evidence</button><button id="replay-evidence" class="ghost">Replay 已保存状态</button>${row.kind === 'regression' ? '<div class="segmented"><button id="view-v1">看 V1</button><button id="view-v2" class="active">看 V2</button></div>' : ''}</div>${reg?.non_comparable_reason ? `<p class="panel-message warn">${escapeHtml(reg.non_comparable_reason)}</p>` : ''}<p class="hint">正式数值来自 Python/OCP B-Rep；Babylon 仅负责理解和复核。</p>`;
+  $('#inspector').innerHTML = `<div class="metric">${e.value ?? '—'} <small>${escapeHtml(e.unit || '')}</small></div>${compare}<dl class="kv"><dt>Case</dt><dd>${escapeHtml(row.caseId)}</dd><dt>成熟度</dt><dd>${escapeHtml(LABELS[e.rule_authority] || e.rule_authority || '—')}</dd><dt>Executor</dt><dd>${escapeHtml(e.executor || '—')}</dd><dt>阈值</dt><dd>${escapeHtml(thresholdText(row))}</dd><dt>Margin</dt><dd>${e.margin ?? '—'}</dd><dt>Method</dt><dd>${escapeHtml(e.evidence?.measurement_method || '—')}</dd><dt>Evidence</dt><dd>${escapeHtml(e.evidence?.annotation || '—')}</dd></dl><div class="action-stack"><button id="view-evidence" class="primary">重新定位 Evidence</button><button id="replay-evidence" class="ghost">Replay 已保存状态</button>${row.kind === 'regression' ? '<div class="segmented"><button id="view-v1">看 V1</button><button id="view-v2" class="active">看 V2</button></div>' : ''}</div>${reg?.non_comparable_reason ? `<p class="panel-message warn">${escapeHtml(reg.non_comparable_reason)}</p>` : ''}<p class="hint">正式数值来自 Python/OCP B-Rep；xeokit 仅负责理解和复核。</p>`;
   $('#view-evidence').onclick = () => showEvidence(row, row.kind === 'regression' ? (state.evidenceModel || 'V2') : state.model, {persist:true}).catch(showError);
   $('#replay-evidence').onclick = () => replayEvidence(row).catch(showError);
   if ($('#view-v1')) $('#view-v1').onclick = () => showEvidence(row, 'V1', {persist:false}).catch(showError);
@@ -532,6 +621,9 @@ function rowExecutionForModel(row, modelKey) {
 }
 async function showEvidence(row, modelKey, {persist=false}={}) {
   if (!row?.run?.run_id || !modelKey) return;
+  state.previewToken += 1;
+  state.previewLoading = false;
+  state.viewer?.disposePreview();
   await ensureModelForEvidence(modelKey);
   const result = await submitJob('EVIDENCE_DETAIL', {
     model:modelKey, run_id:row.run.run_id, case_id:row.caseId,
@@ -545,7 +637,7 @@ async function showEvidence(row, modelKey, {persist=false}={}) {
   viewer.showEvidenceGeometry(execution);
   viewer.focusObjects(ids);
   $('#vt').textContent = `${modelKey} · ${row.title}`;
-  $('#viewer-meta').textContent = 'Evidence Detail · Babylon / OCP';
+  $('#viewer-meta').textContent = 'Evidence Detail · xeokit / OCP';
   if (persist && ['FAIL','REVIEW_REQUIRED'].includes(execution.status)) {
     await sleep(80);
     await persistEvidence(row, execution);
@@ -636,6 +728,7 @@ async function refreshModels() {
     state.selectedOccurrence = null;
     state.viewer?.clear();
     $('#vt').textContent = `${state.model} · 未加载`;
+    $('#viewer-meta').textContent = '尚未加载';
     setStatus('#status-tree', 'Tree: —');
     updateModelMeta();
     renderNavigation();

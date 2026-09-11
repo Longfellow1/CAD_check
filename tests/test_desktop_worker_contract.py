@@ -75,6 +75,40 @@ def test_worker_open_model_returns_canonical_tree_and_scoped_readiness(manager: 
     assert result["model_sha"]
 
 
+def test_worker_viewer_surface_preview_builds_compressed_chunk(manager: CadWorkerManager):
+    manifest_job = submit_and_wait(
+        manager,
+        "VIEWER_MANIFEST",
+        {"model": "V2", "profile": "normal"},
+        timeout_s=60.0,
+    )
+    assert manifest_job["state"] == "SUCCEEDED", manifest_job
+    manifest = manifest_job["result"]["manifest"]
+    assert manifest["profile"]["name"] == "normal"
+    assert manifest["part_count"] == 12
+    assert manifest["chunk_count"] > 0
+
+    first = manifest["chunks"][0]
+    chunk_job = submit_and_wait(
+        manager,
+        "VIEWER_CHUNK",
+        {
+            "model": "V2",
+            "profile": "normal",
+            "chunk_id": first["id"],
+        },
+        timeout_s=60.0,
+    )
+    assert chunk_job["state"] == "SUCCEEDED", chunk_job
+    result = chunk_job["result"]
+    assert result["derivative_id"] == manifest["derivative_id"]
+    assert result["chunk_id"] == first["id"]
+    assert result["meta"]["profile"] == "normal"
+    assert result["meta"]["tessellator"] == "occt-brepmesh"
+    cached = manager.root / ".cadcheck" / "cache" / "viewer" / result["derivative_id"] / f"{first['id']}.json.gz"
+    assert cached.exists()
+
+
 def test_worker_three_golden_executors_match_locked_truth(manager: CadWorkerManager):
     expected = {
         "CLR_BAT_BRACKET": ("FAIL", 8.0, "mm", "minimum_clearance"),

@@ -32,6 +32,7 @@ from .cad.binding import resolve_binding
 from .cad.source_identity import source_sha256
 from .cad.step_reader import model_readiness
 from .cad.tessellation import tessellate_occurrence_paths
+from .cad.view_derivative import ViewDerivativeStore
 
 
 Progress = Callable[..., None]
@@ -328,6 +329,33 @@ def execute_job(
             render_edges=bool(payload.get("render_edges", False)),
         )
 
+    if kind == "VIEWER_MANIFEST":
+        key = payload["model"]
+        profile = str(payload.get("profile", "preview"))
+        progress("TESSELLATING", f"准备 Viewer {profile} 面预览清单")
+        model = _ensure_model(workspace, root, key, payload.get("descriptor"))
+        manifest = ViewDerivativeStore(root).manifest(key, model, profile=profile)
+        return {"manifest": manifest}
+
+    if kind == "VIEWER_CHUNK":
+        key = payload["model"]
+        profile = str(payload.get("profile", "preview"))
+        chunk_id = str(payload["chunk_id"])
+        progress("TESSELLATING", f"生成 Viewer {profile} 面预览 {chunk_id}")
+        model = _ensure_model(workspace, root, key, payload.get("descriptor"))
+        store = ViewDerivativeStore(root)
+        manifest = store.manifest(key, model, profile=profile)
+        chunk = store.build_chunk(key, model, chunk_id, profile=profile)
+        # The geometry is persisted in the compressed cache. Never copy the
+        # potentially large mesh payload through the Controller spool/result.
+        return {
+            "model": key,
+            "profile": profile,
+            "derivative_id": manifest["derivative_id"],
+            "chunk_id": chunk_id,
+            "meta": chunk.get("meta", {}),
+        }
+
     if kind == "CHECK":
         key = payload["model"]
         _ensure_model(workspace, root, key)
@@ -416,6 +444,8 @@ def run_worker(root: Path, spool: Path, poll_seconds: float = 0.08) -> None:
             traceback.print_exc()
 
     stop_heartbeat = threading.Event()
+    stop_parent_watch = threading.Event()
+    owner_pid = os.getppid()
 
     def heartbeat_loop():
         while not stop_heartbeat.is_set():
@@ -427,6 +457,21 @@ def run_worker(root: Path, spool: Path, poll_seconds: float = 0.08) -> None:
 
     heartbeat = threading.Thread(target=heartbeat_loop, name="cad-worker-heartbeat", daemon=True)
     heartbeat.start()
+
+    def parent_watch_loop():
+        """Exit if the Runtime Controller disappears without a clean shutdown.
+
+        The worker intentionally lives in its own process group so hard cancel
+        can kill native OCCT calls. That also means a terminal interrupt can
+        otherwise orphan it under PID 1. A small self-watch closes that gap,
+        including while the main thread is blocked in a native CAD call.
+        """
+        while not stop_parent_watch.wait(0.5):
+            if os.getppid() != owner_pid:
+                os._exit(0)
+
+    parent_watch = threading.Thread(target=parent_watch_loop, name="cad-worker-parent-watch", daemon=True)
+    parent_watch.start()
 
     try:
         while True:
@@ -516,6 +561,7 @@ def run_worker(root: Path, spool: Path, poll_seconds: float = 0.08) -> None:
                 current_path.unlink(missing_ok=True)
     finally:
         stop_heartbeat.set()
+        stop_parent_watch.set()
 
 
 def main() -> None:

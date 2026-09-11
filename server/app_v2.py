@@ -33,6 +33,11 @@ base_app.mount("/static", StaticFiles(directory=WEB), name="static")
 cards = CheckCardRegistry(ROOT / "checks")
 desktop_router, cad_worker_manager = create_desktop_router(ROOT)
 base_app.include_router(desktop_router)
+# Uvicorn normally gives the sidecar a graceful shutdown window, but relying
+# on ``atexit`` alone leaves the independently-grouped CAD Worker behind when
+# Electron is interrupted from a terminal. Bind cleanup to ASGI shutdown as
+# well so Scania jobs cannot survive the Desktop process.
+base_app.add_event_handler("shutdown", cad_worker_manager.shutdown)
 atexit.register(cad_worker_manager.shutdown)
 
 

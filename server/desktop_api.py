@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import base64
+import json
 from pathlib import Path
+import re
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
@@ -29,6 +31,8 @@ class JobRequest(BaseModel):
         "REGRESSION",
         "EXPLORE",
         "EVIDENCE_DETAIL",
+        "VIEWER_MANIFEST",
+        "VIEWER_CHUNK",
         "PING",
     ]
     payload: dict[str, Any] = Field(default_factory=dict)
@@ -59,6 +63,8 @@ def create_desktop_router(root: str | Path) -> tuple[APIRouter, CadWorkerManager
             "CHECK_SET": 900.0,
             "REGRESSION": 1200.0,
             "EXPLORE": 300.0,
+            "VIEWER_MANIFEST": 900.0,
+            "VIEWER_CHUNK": 900.0,
         }.get(kind, 300.0)
 
     @router.get("/desktop/models")
@@ -123,6 +129,49 @@ def create_desktop_router(root: str | Path) -> tuple[APIRouter, CadWorkerManager
             return manager.cancel(job_id)
         except KeyError as exc:
             raise HTTPException(404, "job not found") from exc
+
+    @router.get("/desktop/viewer/{model_key}/chunks/{chunk_id}")
+    def viewer_chunk(
+        model_key: str,
+        chunk_id: str,
+        derivative_id: str,
+        profile: Literal["preview", "normal", "evidence"] = "preview",
+    ):
+        """Serve a worker-built, compressed Viewer derivative chunk.
+
+        The Runtime Controller never imports OCP or tessellates geometry. The
+        CAD Worker creates the cache entry through VIEWER_CHUNK; this route only
+        validates the manifest identity and streams the resulting file.
+        """
+        safe_segment = re.compile(r"^[A-Za-z0-9_.-]+$")
+        if not all(safe_segment.fullmatch(value) for value in (model_key, chunk_id, derivative_id)):
+            raise HTTPException(400, "invalid viewer derivative identity")
+
+        derivative_dir = root / ".cadcheck" / "cache" / "viewer" / derivative_id
+        manifest_path = derivative_dir / "manifest.json"
+        if not manifest_path.exists():
+            raise HTTPException(404, "viewer derivative manifest not found")
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise HTTPException(500, "viewer derivative manifest is unreadable") from exc
+        if manifest.get("model") != model_key or manifest.get("profile", {}).get("name") != profile:
+            raise HTTPException(409, "viewer derivative identity mismatch")
+        if chunk_id not in {item.get("id") for item in manifest.get("chunks", [])}:
+            raise HTTPException(404, "viewer chunk not found")
+
+        path = derivative_dir / f"{chunk_id}.json.gz"
+        if not path.exists():
+            raise HTTPException(409, "viewer chunk has not been built")
+        return FileResponse(
+            path,
+            media_type="application/json",
+            headers={
+                "Content-Encoding": "gzip",
+                "Cache-Control": "public, max-age=31536000, immutable",
+                "X-CAD-Viewer-Cache": "HIT",
+            },
+        )
 
     @router.get("/runs/{run_id}")
     def run_result(run_id: str):
