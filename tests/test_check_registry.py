@@ -12,22 +12,32 @@ from server.check_registry import CheckCardRegistry
 from server.domain import RuleAuthority
 
 
-def test_registry_loads_the_four_mvp_check_cards():
+def test_registry_loads_the_three_mvp_golden_check_cards():
     registry = CheckCardRegistry(ROOT / "checks")
 
     assert registry.ids() == [
         "ANG_MOTOR_YAW",
         "CLR_BAT_BRACKET",
         "DIR_BAT_GROUND",
-        "HEADROOM_FRONT",
     ]
 
-    headroom = registry.get("HEADROOM_FRONT")
-    assert headroom.engineering_domain == "static_clearance"
-    assert headroom.verification_method == "ANALYSIS_GEOMETRY"
-    assert headroom.executor == "minimum_clearance"
-    assert headroom.required_bindings == ["head_envelope", "roof_surface"]
-    assert headroom.rule.authority == RuleAuthority.PROVISIONAL
+    for card_id in registry.ids():
+        card = registry.get(card_id)
+        assert card.rule.authority == RuleAuthority.FORMAL
+        assert card.ground_truth is not None
+        assert card.ground_truth.get("status") == "LOCKED"
+        assert card.ground_truth.get("source_ref")
+        assert card.ground_truth.get("tolerance") is not None
+
+    assert registry.get("CLR_BAT_BRACKET").executor == "minimum_clearance"
+    assert registry.get("DIR_BAT_GROUND").executor == "directional_distance"
+    assert registry.get("ANG_MOTOR_YAW").executor == "angle"
+
+
+def test_headroom_is_not_in_mvp_product_check_registry():
+    registry = CheckCardRegistry(ROOT / "checks")
+    assert "HEADROOM_FRONT" not in registry.ids()
+    assert not (ROOT / "checks/headroom_front.yaml").exists()
 
 
 def test_registry_rejects_duplicate_card_ids(tmp_path: Path):
