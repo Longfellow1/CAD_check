@@ -35,12 +35,13 @@ def main() -> int:
         raise AssertionError(f"Electron E2E missing stages: {sorted(missing)}")
 
     viewer = payload.get("viewer") or {}
-    if viewer.get("viewer") != "xeokit":
-        raise AssertionError(f"Electron did not exercise xeokit viewer: {viewer}")
-    if viewer.get("representation") != "SceneModel DTX proxy + demand detail":
-        raise AssertionError(f"Unexpected xeokit representation: {viewer}")
-    if viewer.get("proxy_count", 0) < 12:
-        raise AssertionError(f"Viewer did not retain controlled overview: {viewer}")
+    if viewer.get("viewer") != "three-cad":
+        raise AssertionError(f"Electron did not exercise three-cad viewer: {viewer}")
+    if viewer.get("representation") != "three-cad proxy + normalized preview + demand detail":
+        raise AssertionError(f"Unexpected three-cad representation: {viewer}")
+    total = viewer.get("proxy_count", 0) + viewer.get("preview_occurrences", 0) + viewer.get("resident_detail_occurrences", 0)
+    if total < 12:
+        raise AssertionError(f"Viewer did not retain controlled occurrence coverage: {viewer}")
     if viewer.get("resident_detail_occurrences", 0) > viewer.get("max_resident_details", 24):
         raise AssertionError(f"Viewer detail residency exceeded budget: {viewer}")
 
